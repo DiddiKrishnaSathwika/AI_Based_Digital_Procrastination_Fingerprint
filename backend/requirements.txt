@@ -1,0 +1,6 @@
+# ProcrastiSense AI - backend (Flask API that also serves the frontend).
+# Python 3.11 (developed on 3.11.9). Versions are those found in the project's .venv.
+Flask==3.0.3
+Flask-Cors==4.0.1
+Werkzeug==3.1.9
+python-dotenv==1.2.4

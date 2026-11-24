@@ -1,0 +1,7 @@
+# Development / test dependencies (not needed to run the application).
+#   pip install -r requirements-dev.txt
+# The collector-classification tests stub the Windows-only modules, so they do NOT need
+# requirements-collector.txt. Node.js (not a pip package) is optional: without it three
+# frontend tests are skipped and reported as skipped.
+-r requirements.txt
+pytest==9.2.0

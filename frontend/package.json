@@ -1,0 +1,9 @@
+{
+  "name": "procrastisense-ai-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ProcrastiSense AI — static frontend (vanilla HTML/CSS/JS + Chart.js via CDN). No build step: served directly by the Flask backend.",
+  "scripts": {
+    "serve": "python3 -m http.server 5500 --directory ."
+  }
+}

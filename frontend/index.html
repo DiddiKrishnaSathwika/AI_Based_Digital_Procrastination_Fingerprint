@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ProcrastiSense AI — Digital Procrastination Fingerprint</title>
+<link rel="stylesheet" href="styles.css"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ============================= LANDING PAGE ============================= -->
+<div id="landing">
+  <nav class="nav-public">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="17" stroke="#4CD6C0" stroke-width="2"/><circle cx="20" cy="20" r="11" stroke="#4CD6C0" stroke-width="1.4" stroke-dasharray="4 5"/><circle cx="20" cy="20" r="4.5" fill="#4CD6C0"/></svg>
+      ProcrastiSense <span style="color:var(--focus)">AI</span>
+    </div>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#privacy-section">Privacy</a>
+    </div>
+    <button class="btn btn-primary" onclick="enterApp()">Open Dashboard →</button>
+  </nav>
+
+  <header class="hero">
+    <div>
+      <h1>Understand your digital behavior.<br>Predict distraction <span class="accent">before it happens.</span></h1>
+      <p class="sub">Most productivity tools measure total screen time. ProcrastiSense AI studies <em>how</em> you procrastinate — the sequence, timing and triggers behind every switch away from focused work — and builds a personal Digital Procrastination Fingerprint.</p>
+      <div class="cta-row">
+        <button class="btn btn-primary" onclick="enterApp()">Open Dashboard →</button>
+      </div>
+      <p class="cta-note">⬤ Real-Time Mode — collection starts only when you start a focus session</p>
+    </div>
+    <div class="hero-visual">
+      <svg id="hero-fingerprint" width="380" height="380" viewBox="0 0 380 380"></svg>
+    </div>
+  </header>
+
+  <section class="section" id="problem">
+    <div class="section-head">
+      <span class="eyebrow">THE PROBLEM</span>
+      <h2>Screen-time totals hide the pattern that actually matters.</h2>
+      <p class="desc">Knowing you spent "3 hours on your phone" doesn't explain <em>when</em> you lose focus, <em>why</em>, or what happens right before it. Generic blockers apply the same rule to everyone, at every hour, regardless of task difficulty.</p>
+    </div>
+    <div class="grid-3">
+      <div class="tile"><span class="num">01</span><h3>Aggregate, not behavioral</h3><p>Total usage numbers say nothing about the sequence of app switches that led there.</p></div>
+      <div class="tile"><span class="num">02</span><h3>Reactive, not predictive</h3><p>Most tools intervene only after a distraction has already started.</p></div>
+      <div class="tile"><span class="num">03</span><h3>Generic, not personal</h3><p>A 25-minute Pomodoro doesn't fit everyone — your own distraction window is unique to you.</p></div>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="section-head">
+      <span class="eyebrow">KEY FEATURES</span>
+      <h2>What the prototype demonstrates today.</h2>
+    </div>
+    <div class="grid-3">
+      <div class="tile"><h3>🫆 Procrastination Fingerprint</h3><p>Your typical focus duration, distraction window, riskiest tasks and hours, generated as a natural-language behavioral summary.</p></div>
+      <div class="tile"><h3>⏱ Live Session Monitor</h3><p>A real, running focus-session timer with a live distraction-risk indicator.</p></div>
+      <div class="tile"><h3>📈 Behavioral Analytics</h3><p>Eight interactive charts covering focus trends, switching frequency and category usage.</p></div>
+      <div class="tile"><h3>🔮 Distraction Prediction</h3><p>A transparent, clearly-labelled prototype prediction with the factors behind the risk score.</p></div>
+      <div class="tile"><h3>🧭 Personalized Interventions</h3><p>Micro-breaks, focus sprints, distraction blocking and switching control — selected by rules over your recorded activity, each with the evidence shown.</p></div>
+      <div class="tile"><h3>🔒 Privacy-First Design</h3><p>Category-level tracking only. No keystrokes, no message content, no screenshots — ever.</p></div>
+    </div>
+  </section>
+
+
+  <div class="privacy-band" id="privacy-section">
+    <div>
+      <span class="eyebrow">PRIVACY-FIRST BY DESIGN</span>
+      <h2 style="margin-top:10px;">We track categories, not content.</h2>
+      <p class="desc" style="margin-top:12px;">The desktop collector — and this prototype's data model — are built to record behavioral signal only.</p>
+    </div>
+    <ul class="privacy-list">
+      <li>Application name &amp; category, timestamp, duration, focus label</li>
+      <li>No passwords, ever</li>
+      <li>No keystroke logging</li>
+      <li>No message or document content</li>
+      <li>No screenshots by default</li>
+      <li>Data export and deletion: not available in this prototype</li>
+    </ul>
+  </div>
+
+  <div class="big-cta">
+    <span class="eyebrow">TRY THE PROTOTYPE</span>
+    <h2>Open the dashboard and explore your fingerprint.</h2>
+    <p class="sub">Running with real-time activity collected from this device.</p>
+    <div class="cta-row"><button class="btn btn-primary" onclick="enterApp()">Open Dashboard →</button></div>
+  </div>
+
+  <footer class="public-footer">
+    <span>ProcrastiSense AI</span>
+    <span>Real-Time Activity Active</span>
+  </footer>
+</div>
+
+<!-- ============================= AUTHENTICATION ============================= -->
+<div id="auth-screen" style="display:none;min-height:100vh;align-items:center;justify-content:center;padding:24px;">
+  <div class="card" style="width:100%;max-width:440px;padding:32px;">
+    <div class="brand" style="margin-bottom:24px;">
+      ProcrastiSense <span style="color:var(--focus)">AI</span>
+    </div>
+
+    <!-- LOGIN -->
+    <div id="login-form">
+      <h2>Welcome back</h2>
+      <p class="desc" style="margin:8px 0 22px;">Log in to access your personal productivity dashboard.</p>
+
+      <form onsubmit="return loginUser(event)">
+        <label>Email Address</label>
+        <input type="email" id="login-email" placeholder="Enter your email" required style="width:100%;margin:8px 0 16px;">
+
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="Enter your password" required style="width:100%;margin:8px 0 16px;">
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">Log In</button>
+      </form>
+
+      <p style="text-align:center;margin-top:18px;font-size:13px;">
+        <a href="#" onclick="showAuthForm('forgot');return false;">Forgot Password?</a>
+      </p>
+
+      <p style="text-align:center;margin-top:12px;font-size:13px;">
+        Don't have an account?
+        <a href="#" onclick="showAuthForm('register');return false;">Create Account</a>
+      </p>
+    </div>
+
+    
+<!-- REGISTER -->
+<div id="register-form" style="display:none;">
+  <h2>Create your account</h2>
+  <p class="desc" style="margin:8px 0 22px;">Start building your personal digital fingerprint.</p>
+
+  <form onsubmit="return registerUser(event)">
+
+    <label>Full Name</label>
+    <input type="text" id="register-name" placeholder="Enter your full name"
+      required maxlength="100" style="width:100%;margin:8px 0 16px;">
+
+    <label>Email Address</label>
+    <input type="email" id="register-email" placeholder="Enter your email"
+      required style="width:100%;margin:8px 0 16px;">
+
+    <label>Password</label>
+    <input type="password" id="register-password"
+      placeholder="Minimum 8 characters" minlength="8"
+      required style="width:100%;margin:8px 0 10px;">
+
+    <button type="button" class="btn btn-secondary"
+      onclick="generatePassword()"
+      style="width:100%;margin-bottom:16px;">
+      Generate Strong Password
+    </button>
+
+    <label>Confirm Password</label>
+    <input type="password" id="register-confirm-password"
+      placeholder="Re-enter your password" minlength="8"
+      required style="width:100%;margin:8px 0 20px;">
+
+    <button type="submit" class="btn btn-primary" style="width:100%;">
+      Create Account
+    </button>
+  </form>
+
+  <p style="text-align:center;margin-top:18px;font-size:13px;">
+    Already registered?
+    <a href="#" onclick="showAuthForm('login');return false;">Log In</a>
+  </p>
+</div>
+
+
+    <!-- FORGOT PASSWORD -->
+    <div id="forgot-form" style="display:none;">
+      <h2>Reset your password</h2>
+      <p class="desc" style="margin:8px 0 22px;">Enter your registered email address to request a password reset.</p>
+
+      <form onsubmit="return requestPasswordReset(event)">
+        <label>Email Address</label>
+        <input type="email" id="forgot-email" placeholder="Enter your registered email" required style="width:100%;margin:8px 0 16px;">
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">Request Reset</button>
+      </form>
+
+      <p style="text-align:center;margin-top:18px;font-size:13px;">
+        <a href="#" onclick="showAuthForm('login');return false;">Back to Login</a>
+      </p>
+    </div>
+
+    <!-- SET NEW PASSWORD -->
+    <div id="reset-form" style="display:none;">
+      <h2>Choose a new password</h2>
+
+      <form onsubmit="return resetPassword(event)">
+        <label>New Password</label>
+        <input type="password" id="reset-password" minlength="8" placeholder="Minimum 8 characters" required style="width:100%;margin:8px 0 16px;">
+
+        <button type="submit" class="btn btn-primary" style="width:100%;">Update Password</button>
+      </form>
+    </div>
+
+    <p style="text-align:center;margin-top:24px;font-size:12px;">
+      <a href="#" onclick="backToLanding();return false;">← Back to Home</a>
+    </p>
+  </div>
+</div>
+<!-- ============================= END AUTHENTICATION ============================= -->
+
+<!-- ============================= APP SHELL ============================= -->
+<div id="app">
+<div class="modal-backdrop" id="report-modal">
+  <div class="modal">
+    <span class="close-x" onclick="closeReport()">✕</span>
+    <span class="eyebrow">WEEKLY REPORT</span>
+    <h3 style="margin-top:8px;">Your last 7 days</h3>
+    <div id="report-body" style="margin-top:16px;font-size:13.5px;color:var(--muted);display:grid;gap:10px;"></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand" style="cursor:pointer" onclick="exitApp()">
+      <svg width="24" height="24" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="17" stroke="#4CD6C0" stroke-width="2"/><circle cx="20" cy="20" r="11" stroke="#4CD6C0" stroke-width="1.4" stroke-dasharray="4 5"/><circle cx="20" cy="20" r="4.5" fill="#4CD6C0"/></svg>
+      ProcrastiSense
+    </div>
+    <nav id="side-nav"></nav>
+    <div class="sidebar-footer">
+      <div class="demo-toggle">
+        <span>Dark Mode</span>
+        <div class="switch on" id="demo-switch" onclick="toggleDemo()"></div>
+      </div>
+      <button class="btn btn-primary"
+        onclick="logoutUser()"
+        style="width:100%;margin-top:12px;">
+  Log Out
+</button>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- DASHBOARD -->
+    <section class="page active" id="page-dashboard">
+      
+<div class="topbar">
+  <div>
+    <h1>Dashboard</h1>
+    <p class="desc">Welcome, <span id="dashboard-user-name">User</span>! Here's your behavioral summary.</p>
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <span class="badge demo">◆ Real-Time Activity Data</span>
+    <button class="btn btn-sm" onclick="openReport()">Generate Weekly Report</button>
+  </div>
+</div>
+
+      <div class="metrics-grid" id="dash-metrics"></div>
+      <div class="two-col">
+        <div class="card">
+          <div class="section-title">Current Session Monitor <span class="badge" id="session-risk-badge">Idle</span></div>
+          <div class="two-col" style="grid-template-columns:1fr 1fr;">
+            <div>
+              <label>Task</label>
+              
+<select id="task-select">
+  <optgroup label="Learning & Development">
+    <option>Software Development</option>
+    <option>Programming Practice</option>
+    <option>Concept Learning</option>
+    <option>Online Course</option>
+    <option>Technical Learning</option>
+  </optgroup>
+
+  <optgroup label="Exam Preparation">
+    <option>Exam Revision</option>
+    <option>Mock Tests</option>
+    <option>Practice Questions</option>
+    <option>Assignment Solving</option>
+    <option>Lab Practice</option>
+  </optgroup>
+
+  <optgroup label="Research & Analysis">
+    <option>Research Reading</option>
+    <option>Research Paper Review</option>
+    <option>Literature Survey</option>
+    <option>Data Analysis</option>
+    <option>Dataset Exploration</option>
+  </optgroup>
+
+  <optgroup label="Writing & Documentation">
+    <option>Report Writing</option>
+    <option>Technical Documentation</option>
+    <option>Content Writing</option>
+    <option>Note Making</option>
+    <option>Blog Writing</option>
+  </optgroup>
+
+  <optgroup label="Creative Work">
+    <option>Creative Writing</option>
+    <option>Brainstorming</option>
+    <option>Presentation Design</option>
+    <option>Graphic Design</option>
+  </optgroup>
+
+  <optgroup label="Career & Professional">
+    <option>Interview Preparation</option>
+    <option>Resume Building</option>
+    <option>Job Applications</option>
+    <option>Project Development</option>
+    <option>Email Management</option>
+  </optgroup>
+
+  <optgroup label="Personal Productivity">
+    <option>Daily Planning</option>
+    <option>Task Management</option>
+    <option>Reading</option>
+    <option>Other</option>
+  </optgroup>
+</select>
+
+              <label style="margin-top:12px;">Task Difficulty</label>
+              <select id="difficulty-select"><option>Low</option><option selected>Medium</option><option>High</option></select>
+              <div class="btn-row">
+                <button class="btn btn-primary btn-sm" id="start-session-btn" onclick="startSession()">Start Focus Session</button>
+                <button class="btn btn-sm" id="end-session-btn" onclick="endSession()" disabled>End Session</button>
+              </div>
+            </div>
+            <div class="session-ring">
+              <svg width="150" height="150" viewBox="0 0 150 150">
+                <circle cx="75" cy="75" r="64" stroke="#232A3B" stroke-width="10" fill="none"/>
+                <circle id="session-progress" cx="75" cy="75" r="64" stroke="#4CD6C0" stroke-width="10" fill="none" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="402" transform="rotate(-90 75 75)"/>
+                <text x="75" y="70" text-anchor="middle" fill="#E7EAF2" font-family="IBM Plex Mono" font-size="20" font-weight="600" id="session-timer-text">00:00</text>
+                <text x="75" y="90" text-anchor="middle" fill="#8892A6" font-family="Inter" font-size="10" id="session-app-text">Not started</text>
+              </svg>
+            </div>
+          </div>
+          <div class="session-meta">
+            <div>Current Application<b id="cur-app">—</b></div>
+            <div>Current Distraction Risk<b id="cur-risk">—</b></div>
+          </div>
+        </div>
+        <div class="card" id="early-warning-slot">
+          <div class="section-title">Early Warning</div>
+          <div id="warning-content"><p class="empty">Start a focus session to enable live distraction warnings.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINGERPRINT -->
+    <section class="page" id="page-fingerprint">
+      <div class="topbar">
+        <div><h1>My Procrastination Fingerprint</h1><p class="desc">Your personal behavioral signature, learned from activity history</p></div>
+        <span class="badge proto" id="fp-badge">Generated from Real-Time Activity Data</span>
+      </div>
+      <div class="two-col">
+        <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+          <svg id="fingerprint-viz" width="300" height="300" viewBox="0 0 300 300"></svg>
+          <p style="margin-top:6px;color:var(--muted);font-size:12px;">Each ring segment = one recorded activity block this history</p>
+        </div>
+        <div class="card">
+          <div class="section-title">Behavioral Summary</div>
+          <p id="fp-narrative" style="font-size:14.5px;line-height:1.7;color:var(--text);"></p>
+        </div>
+      </div>
+      <div class="grid-4" style="margin-top:20px;" id="fp-metrics"></div>
+    </section>
+
+    <!-- TIMELINE -->
+    <section class="page" id="page-timeline">
+      <div class="topbar">
+        <div><h1>Activity Timeline</h1><p class="desc">Chronological log of application activity</p></div>
+        <span class="badge demo">Real-Time Activity Data</span>
+      </div>
+      <div class="filter-row" id="tl-filters">
+        <button class="filter-pill active" data-f="All">All</button>
+        <button class="filter-pill" data-f="Focused">Focused</button>
+        <button class="filter-pill" data-f="Distracted">Distracted</button>
+        <button class="filter-pill" data-f="Idle">Idle</button>
+      </div>
+      <div class="card"><div class="timeline" id="timeline-list"></div></div>
+    </section>
+
+    <!-- ANALYTICS -->
+    <section class="page" id="page-analytics">
+      <div class="topbar">
+        <div><h1>Analytics</h1><p class="desc">Behavioral analytics across your recorded activity</p></div>
+        <span class="badge demo">Real-Time Activity Data</span>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="section-title">Focus Score Over Time</div><div class="chart-box"><canvas id="chart-focus-time"></canvas></div></div>
+        <div class="card"><div class="section-title">Distraction Probability by Time of Day</div><div class="chart-box"><canvas id="chart-distract-time"></canvas></div></div>
+        <div class="card"><div class="section-title">Application Category Usage</div><div class="chart-box"><canvas id="chart-cat-usage"></canvas></div></div>
+        <div class="card"><div class="section-title">Application Switching Frequency</div><div class="chart-box"><canvas id="chart-switch-freq"></canvas></div></div>
+        <div class="card"><div class="section-title">Focus Duration Distribution</div><div class="chart-box"><canvas id="chart-focus-dist"></canvas></div></div>
+        <div class="card"><div class="section-title">Task Difficulty vs Distraction</div><div class="chart-box"><canvas id="chart-diff-distract"></canvas></div></div>
+        <div class="card"><div class="section-title">Daily Productivity Trend</div><div class="chart-box"><canvas id="chart-daily-trend"></canvas></div></div>
+        <div class="card"><div class="section-title">Distraction Events by Hour</div><div class="chart-box"><canvas id="chart-hourly-events"></canvas></div></div>
+      </div>
+    </section>
+
+    <!-- PREDICTION -->
+    <section class="page" id="page-prediction">
+      <div class="topbar">
+        <div><h1>Distraction Prediction</h1><p class="desc">Prototype forecast of upcoming distraction risk</p></div>
+        <span class="badge proto" id="pred-badge">Prediction</span>
+      </div>
+      <div class="two-col">
+        <div class="card gauge-wrap">
+          <svg width="220" height="130" viewBox="0 0 220 130" id="risk-gauge"></svg>
+          <div style="text-align:center;margin-top:6px;">
+            <div class="mono" style="font-size:12px;color:var(--muted);">RISK LEVEL</div>
+            <div id="risk-level-text" style="font-family:'Space Grotesk';font-size:22px;font-weight:700;margin-top:4px;">—</div>
+          </div>
+          <div class="grid-3" style="width:100%;margin-top:22px;gap:12px;">
+            <div class="tile" style="padding:14px;text-align:center;"><div class="num">Distraction Prob.</div><div style="font-family:'Space Grotesk';font-size:20px;margin-top:6px;" id="pred-prob">—</div></div>
+            <div class="tile" style="padding:14px;text-align:center;"><div class="num">Predicted Window</div><div style="font-family:'Space Grotesk';font-size:16px;margin-top:6px;" id="pred-window">—</div></div>
+            <div class="tile" style="padding:14px;text-align:center;"><div class="num">Confidence</div><div style="font-family:'Space Grotesk';font-size:20px;margin-top:6px;" id="pred-conf">—</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title">Prediction Factors</div>
+          <ul class="factor-list" id="pred-factors"></ul>
+          <p style="margin-top:16px;font-size:11.5px;color:var(--muted-2);border-top:1px solid var(--line);padding-top:12px;">Generated by a transparent rule-based heuristic over recorded activity — not a trained ML model. A trained model is future work and is not part of the current implementation.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- INTERVENTIONS -->
+    <section class="page" id="page-interventions">
+      <div class="topbar">
+        <div><h1>Interventions</h1><p class="desc">Suggestions selected by rules over your recorded activity</p></div>
+      </div>
+      <div class="interv-grid" id="interv-grid"></div>
+    </section>
+
+    <!-- DATA COLLECTION -->
+    <section class="page" id="page-collection">
+      <div class="topbar"><div><h1>Data Collection</h1><p class="desc">Real-time activity collected from your device and persisted to the SQLite database</p></div></div>
+      <div class="two-col">
+        <div class="card">
+          <div class="section-title">Add Activity Record</div>
+          <form id="activity-form" onsubmit="return submitActivity(event)">
+            <div class="form-grid">
+              <div><label>Application</label><input type="text" id="f-app" placeholder="e.g. VS Code" required></div>
+              <div><label>Category</label>
+                <select id="f-cat"><option>Coding</option><option>Study</option><option>Work</option><option>Research</option><option>Social Media</option><option>Entertainment</option><option>Communication</option><option>Browser</option><option>Other</option></select>
+              </div>
+              <div><label>Session Duration (min)</label><input type="number" id="f-dur" min="1" value="15" required></div>
+              <div><label>Task Type</label>
+                <select id="f-task"><option>Coding</option><option>Study</option><option>Research</option><option>Writing</option><option>Debugging</option><option>Revision</option></select>
+              </div>
+              <div><label>Task Difficulty</label><select id="f-diff"><option>Low</option><option selected>Medium</option><option>High</option></select></div>
+              <div><label>Idle Time (sec)</label><input type="number" id="f-idle" min="0" value="0"></div>
+              <div><label># Notifications</label><input type="number" id="f-notif" min="0" value="0"></div>
+              <div><label>Focus Level</label><select id="f-focus"><option>Focused</option><option>Distracted</option><option>Idle</option></select></div>
+            </div>
+            <button class="btn btn-primary" style="margin-top:16px;width:100%;">Add Record</button>
+          </form>
+        </div>
+        <div class="card">
+          <div class="section-title">Recent Records</div>
+          <div style="max-height:420px;overflow-y:auto;">
+            <table><thead><tr><th>Time</th><th>App</th><th>Category</th><th>Min</th><th>Status</th></tr></thead><tbody id="records-table"></tbody></table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PRIVACY -->
+    <section class="page" id="page-privacy">
+      <div class="topbar"><div><h1>Privacy &amp; Ethics</h1><p class="desc">What this system collects — and what it does not collect</p></div></div>
+      <div class="two-col">
+        <div class="card">
+          <div class="section-title">What the Collector Records</div>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.6;">The desktop collector records only the signals listed below. Nothing here is a setting you can switch on or off.</p>
+          <div class="grid-2" style="margin-top:16px;">
+            <div>
+              <h4 style="font-size:13px;color:var(--focus);">Collected</h4>
+              <ul class="privacy-list"><li>Application or website name and category</li><li>Timestamp</li><li>Duration of each activity block</li><li>Focus label (Focused / Distracted)</li><li>Task type and difficulty you selected</li><li>App switches (derived from consecutive records)</li></ul>
+            </div>
+            <div>
+              <h4 style="font-size:13px;color:var(--distract);">Never collected</h4>
+              <ul class="privacy-list"><li style="color:var(--muted)">Passwords</li><li style="color:var(--muted)">Keystrokes</li><li style="color:var(--muted)">Message contents</li><li style="color:var(--muted)">Screenshots</li><li style="color:var(--muted)">Page or document contents</li><li style="color:var(--muted)">Web addresses (URLs)</li></ul>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title">Consent &amp; Control</div>
+          <ul class="factor-list">
+            <li>Collection starts only after you press Start Focus Session while the desktop collector is running, and stops when you end the session</li>
+            <li>Only application or website name and category are recorded — never raw content</li>
+            <li>Window titles are read on your computer to recognise websites such as YouTube; the title text is not saved to the database or sent to the server</li>
+            <li>Records are stored in a local SQLite database linked to your account; records you add on the Data Collection page are stored the same way and marked as manual</li>
+            <li>Not implemented in this prototype: a consent dialog, data export, data deletion and idle-time tracking</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="page" id="page-about">
+      <div class="topbar"><div><h1>About Project</h1><p class="desc">AI-Based Digital Procrastination Fingerprint — B.Tech Capstone</p></div></div>
+      <div class="two-col">
+        <div class="card">
+          <div class="section-title">Problem &amp; Solution</div>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.7;">Traditional productivity tools mostly measure screen time. They do not understand an individual's personal procrastination pattern. ProcrastiSense AI learns behavioral patterns, identifies a personal digital procrastination fingerprint, predicts upcoming distraction, explains why the risk is increasing, and provides a personalized intervention.</p>
+        </div>
+        <div class="card">
+          <div class="section-title">Target Users</div>
+          <div class="stack-row"><span class="chip">Students</span><span class="chip">Exam Prep</span><span class="chip">Programmers</span><span class="chip">Researchers</span><span class="chip">Remote Workers</span><span class="chip">Knowledge Workers</span></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px;">
+        <div class="section-title">Project Progress</div>
+        <div class="status-cols">
+          <div>
+            <h4 style="font-size:13px;color:var(--focus);">✓ Completed</h4>
+            <ul class="status-list done">
+              <li>Project architecture</li><li>Dashboard prototype</li><li>Activity timeline</li><li>Behavioral analytics</li>
+              <li>Fingerprint interface</li><li>Prediction interface</li><li>Intervention system</li><li>Real user data collection</li>
+<li>Desktop activity collector</li>
+              <li>ML pipeline design</li><li>Privacy architecture</li>
+            </ul>
+          </div>
+          <div>
+            <h4 style="font-size:13px;color:var(--moderate);">⏳ In Progress</h4>
+            <ul class="status-list"><li>Model training</li><li>Temporal prediction</li><li>Personalized model evaluation</li></ul>
+          </div>
+          <div>
+            <h4 style="font-size:13px;color:var(--muted);">○ Future Work</h4>
+            <ul class="status-list"><li>LSTM / GRU temporal model</li><li>Larger real-world dataset</li><li>Multi-user personalization</li><li>Model comparison</li><li>Deployment</li></ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
