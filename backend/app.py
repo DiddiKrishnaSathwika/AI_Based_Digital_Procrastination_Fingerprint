@@ -42,23 +42,46 @@ DB_PATH = os.environ.get(
     "DATABASE_PATH",
     os.path.join(BASE_DIR, "procrastisense.db")
 )
+
 def send_email(to_email, subject, body):
-    sender_email = os.environ.get("SMTP_EMAIL")
-    app_password = os.environ.get("SMTP_APP_PASSWORD")
+    import json
+    import urllib.request
+    import urllib.error
 
-    if not sender_email or not app_password:
-        raise RuntimeError("Email configuration is missing.")
+    api_url = os.environ.get("EMAIL_API_URL")
+    api_token = os.environ.get("EMAIL_API_TOKEN")
 
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = sender_email
-    message["To"] = to_email
-    message.set_content(body)
+    if not api_url or not api_token:
+        raise RuntimeError("Email API configuration is missing.")
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login(sender_email, app_password)
-        server.send_message(message)
+    payload = json.dumps({
+        "to": to_email,
+        "subject": subject,
+        "body": body,
+        "token": api_token
+    }).encode("utf-8")
+
+    request = urllib.request.Request(
+        api_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        if not result.get("success"):
+            raise RuntimeError(
+                result.get("error", "Email service failed.")
+            )
+
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(
+            f"Email service HTTP error: {error.code}"
+        ) from error
+
 def create_email_verification_token(conn, user_id):
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode()).hexdigest()
