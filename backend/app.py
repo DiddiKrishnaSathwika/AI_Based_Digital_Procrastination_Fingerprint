@@ -34,9 +34,14 @@ import hashlib
 import secrets
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "procrastisense.db")
 FRONTEND_DIR = os.path.join(os.path.dirname(BASE_DIR), "frontend")
+
 load_dotenv(os.path.join(BASE_DIR, ".env"))
+
+DB_PATH = os.environ.get(
+    "DATABASE_PATH",
+    os.path.join(BASE_DIR, "procrastisense.db")
+)
 def send_email(to_email, subject, body):
     sender_email = os.environ.get("SMTP_EMAIL")
     app_password = os.environ.get("SMTP_APP_PASSWORD")
@@ -152,8 +157,10 @@ ProcrastiSense AI Team
     send_email(email, subject, body)
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+if os.environ.get("FLASK_ENV") == "production" and not os.environ.get("SECRET_KEY"):
+    raise RuntimeError("SECRET_KEY must be configured in production.")
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("FLASK_ENV") == "production"
 
 
 def generate_collector_token():
@@ -471,7 +478,7 @@ def init_db():
         conn.execute(
             "ALTER TABLE activity ADD COLUMN user_id INTEGER REFERENCES users(id)"
         )
-    
+
     # Store the currently active task for each user
     conn.execute(
         """
@@ -485,7 +492,7 @@ def init_db():
         )
         """
     )
-    
+
     # Store secure authentication tokens for desktop collectors
     conn.execute(
         """
@@ -498,6 +505,7 @@ def init_db():
         )
         """
     )
+    
 
 
     # Improve user-specific activity lookup
@@ -1829,10 +1837,6 @@ def api_dashboard():
         "avg_focus_session_min": m["avg_focus"],
         "data_label": "Real-Time Activity Data",
     })
-
-
-
-
 @app.route("/api/activity", methods=["GET", "POST"])
 def api_activity():
 
