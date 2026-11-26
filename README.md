@@ -139,7 +139,6 @@ ProcrastiSense-AI/
 |   |-- index.html
 |   |-- app.js
 |   |-- styles.css
-|   |-- reset-password.html
 |   |-- package.json
 |
 |-- scripts/
@@ -179,11 +178,11 @@ cd ProcrastiSense-AI
 ### Step 2: Configure the Database
 
 Create a root-level `.env` file (it is ignored by Git) with the Neon
-`DATABASE_URL`, a locally generated `SECRET_KEY`, and the values required by
-the email service. Do not commit credentials.
+`DATABASE_URL` and a locally generated `SECRET_KEY`. Do not commit credentials.
 
 The backend loads this root `.env` for local development. Vercel deployments
-must set those values in the project's Environment Variables instead.
+must set those values in the project's Environment Variables instead. Email
+verification and password-reset services are not used.
 
 ### Step 3: Create a Virtual Environment
 
@@ -240,11 +239,11 @@ to `backend.wsgi:app`; the root `requirements.txt` includes the backend runtime
 dependencies, and `vercel.json` packages the sibling `frontend` files with the
 function.
 
-Set `DATABASE_URL`, `SECRET_KEY`, `APP_BASE_URL`, `EMAIL_API_URL`,
-`EMAIL_API_TOKEN`, and `FLASK_ENV=production` as Vercel environment variables.
-Set `FRONTEND_ORIGIN` if the frontend uses a separate origin; same-origin
-frontend/API hosting does not require CORS. Use `.env.example` as the local
-configuration template, replacing all placeholders privately.
+Set `DATABASE_URL`, `SECRET_KEY`, and `FLASK_ENV=production` as Vercel
+environment variables. Set `FRONTEND_ORIGIN` if the frontend uses a separate
+origin; same-origin frontend/API hosting does not require CORS. Use
+`.env.example` as the local configuration template, replacing all placeholders
+privately.
 
 For the desktop collector, install `backend\requirements-collector.txt` and
 set `COLLECTOR_API_URL` to the deployed Flask API's `/api/activity` URL.

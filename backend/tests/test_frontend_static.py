@@ -20,7 +20,7 @@ def privacy_section():
 
 
 def test_TC_UI_01_privacy_page_has_no_unimplemented_claims():
-    """TC-UI-01: removed claims (export, deletion, opt-in consent, idle time) are gone from the privacy page."""
+    """TC-UI-01: privacy text does not claim deletion or idle-time tracking is unavailable."""
     p = privacy_section().lower()
     for bad in ("export and deletion at any time", "explicit opt-in consent", "only consented real-time",
                 "<li>idle time</li>", "private content"):
@@ -29,22 +29,23 @@ def test_TC_UI_01_privacy_page_has_no_unimplemented_claims():
 
 
 def test_TC_UI_02_privacy_page_states_actual_behaviour_and_gaps():
-    """TC-UI-02: privacy page lists what is collected and explicitly states what is NOT implemented."""
+    """TC-UI-02: privacy page lists actual collection, deletion controls, and remaining gaps."""
     p = privacy_section()
     for needed in ("Start Focus Session", "Window titles are read", "not saved to the database",
-                   "Not implemented in this prototype", "data export", "data deletion", "idle-time tracking",
-                   "Task type and difficulty you selected", "marked as manual"):
+                   "Data export and a consent dialog are not implemented", "Delete Account",
+                   "Confirm your password", "activity history", "Task type and difficulty you selected",
+                   "marked as manual", "PostgreSQL"):
         assert needed in p, needed
     assert "Keystrokes" in p and "Screenshots" in p and "Passwords" in p
 
 
 def test_TC_UI_03_landing_page_claims_corrected():
-    """TC-UI-03: landing page no longer claims consent monitoring, deletion, idle time or notification control."""
+    """TC-UI-03: landing page accurately describes account deletion and other limitations."""
     low = HTML.lower()
     assert "user-controlled data deletion" not in low
     assert "monitoring consented activity" not in low
     assert "notification control" not in low
-    assert "not available in this prototype" in low
+    assert "data export is not available" in low
 
 
 def test_TC_UI_04_no_removed_intervention_titles_in_js():
@@ -148,3 +149,13 @@ def test_TC_UI_10_every_element_id_used_by_js_exists_and_nav_pages_have_sections
 def test_TC_UI_11_break_message_is_accurate():
     """TC-UI-11: the 'Take a break' message no longer claims the session is paused or a demo."""
     assert "keeps running and the collector keeps recording" in JS
+
+
+def test_TC_UI_12_email_auth_forms_removed_and_toast_visible():
+    """Retired email forms are absent, and authentication feedback is outside the hidden app."""
+    for needle in ("forgot-form", "reset-form", "Forgot Password?", "register-confirm-password"):
+        assert needle not in HTML, needle
+    for needle in ("requestPasswordReset", "forgot-password", "reset-password"):
+        assert needle not in JS, needle
+    assert HTML.index('id="toast"') < HTML.index('id="app"')
+    assert 'id="delete-account-form"' in HTML

@@ -78,7 +78,7 @@
       <li>No keystroke logging</li>
       <li>No message or document content</li>
       <li>No screenshots by default</li>
-      <li>Data export and deletion: not available in this prototype</li>
+      <li>Account deletion is available from the Privacy &amp; Ethics section; data export is not available</li>
     </ul>
   </div>
 
@@ -117,10 +117,6 @@
         <button type="submit" class="btn btn-primary" style="width:100%;">Log In</button>
       </form>
 
-      <p style="text-align:center;margin-top:18px;font-size:13px;">
-        <a href="#" onclick="showAuthForm('forgot');return false;">Forgot Password?</a>
-      </p>
-
       <p style="text-align:center;margin-top:12px;font-size:13px;">
         Don't have an account?
         <a href="#" onclick="showAuthForm('register');return false;">Create Account</a>
@@ -154,11 +150,6 @@
       Generate Strong Password
     </button>
 
-    <label>Confirm Password</label>
-    <input type="password" id="register-confirm-password"
-      placeholder="Re-enter your password" minlength="8"
-      required style="width:100%;margin:8px 0 20px;">
-
     <button type="submit" class="btn btn-primary" style="width:100%;">
       Create Account
     </button>
@@ -171,41 +162,14 @@
 </div>
 
 
-    <!-- FORGOT PASSWORD -->
-    <div id="forgot-form" style="display:none;">
-      <h2>Reset your password</h2>
-      <p class="desc" style="margin:8px 0 22px;">Enter your registered email address to request a password reset.</p>
-
-      <form onsubmit="return requestPasswordReset(event)">
-        <label>Email Address</label>
-        <input type="email" id="forgot-email" placeholder="Enter your registered email" required style="width:100%;margin:8px 0 16px;">
-
-        <button type="submit" class="btn btn-primary" style="width:100%;">Request Reset</button>
-      </form>
-
-      <p style="text-align:center;margin-top:18px;font-size:13px;">
-        <a href="#" onclick="showAuthForm('login');return false;">Back to Login</a>
-      </p>
-    </div>
-
-    <!-- SET NEW PASSWORD -->
-    <div id="reset-form" style="display:none;">
-      <h2>Choose a new password</h2>
-
-      <form onsubmit="return resetPassword(event)">
-        <label>New Password</label>
-        <input type="password" id="reset-password" minlength="8" placeholder="Minimum 8 characters" required style="width:100%;margin:8px 0 16px;">
-
-        <button type="submit" class="btn btn-primary" style="width:100%;">Update Password</button>
-      </form>
-    </div>
-
     <p style="text-align:center;margin-top:24px;font-size:12px;">
       <a href="#" onclick="backToLanding();return false;">← Back to Home</a>
     </p>
   </div>
 </div>
 <!-- ============================= END AUTHENTICATION ============================= -->
+
+<div class="toast" id="toast"></div>
 
 <!-- ============================= APP SHELL ============================= -->
 <div id="app">
@@ -217,8 +181,6 @@
     <div id="report-body" style="margin-top:16px;font-size:13.5px;color:var(--muted);display:grid;gap:10px;"></div>
   </div>
 </div>
-<div class="toast" id="toast"></div>
-
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
     <div class="brand" style="cursor:pointer" onclick="exitApp()">
@@ -436,7 +398,7 @@
 
     <!-- DATA COLLECTION -->
     <section class="page" id="page-collection">
-      <div class="topbar"><div><h1>Data Collection</h1><p class="desc">Real-time activity collected from your device and persisted to the SQLite database</p></div></div>
+      <div class="topbar"><div><h1>Data Collection</h1><p class="desc">Real-time activity collected from your device and persisted to your PostgreSQL account</p></div></div>
       <div class="two-col">
         <div class="card">
           <div class="section-title">Add Activity Record</div>
@@ -491,9 +453,16 @@
             <li>Collection starts only after you press Start Focus Session while the desktop collector is running, and stops when you end the session</li>
             <li>Only application or website name and category are recorded — never raw content</li>
             <li>Window titles are read on your computer to recognise websites such as YouTube; the title text is not saved to the database or sent to the server</li>
-            <li>Records are stored in a local SQLite database linked to your account; records you add on the Data Collection page are stored the same way and marked as manual</li>
-            <li>Not implemented in this prototype: a consent dialog, data export, data deletion and idle-time tracking</li>
+            <li>Records are stored in PostgreSQL and linked to your account; records you add on the Data Collection page are stored the same way and marked as manual</li>
+            <li>Data export and a consent dialog are not implemented in this prototype</li>
           </ul>
+          <div class="section-title" style="margin-top:24px;">Delete Account</div>
+          <p style="font-size:13.5px;color:var(--muted);line-height:1.6;">Permanently delete your account, activity history, active task, and collector token. This cannot be undone.</p>
+          <form id="delete-account-form" onsubmit="return deleteAccount(event)" style="margin-top:12px;">
+            <label for="delete-account-password">Confirm your password</label>
+            <input type="password" id="delete-account-password" autocomplete="current-password" required style="width:100%;margin:8px 0 12px;">
+            <button type="submit" class="btn btn-secondary">Delete Account</button>
+          </form>
         </div>
       </div>
     </section>

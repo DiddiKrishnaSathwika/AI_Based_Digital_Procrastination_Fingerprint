@@ -43,8 +43,8 @@ def test_TC_LB_03_existing_dashboard_fields_unchanged(env):
                     "app_switches", "avg_focus_session_min", "data_label"}
 
 
-def test_TC_LB_04_schema_unchanged_and_no_rows_modified(env):
-    """TC-LB-04: the schema has exactly the original tables/columns (no schema change in this patch)."""
+def test_TC_LB_04_activity_schema_unchanged_and_email_tables_removed(env):
+    """TC-LB-04: activity columns remain stable while retired auth tables are absent."""
     cols = {
         row["column_name"]
         for row in env.query(
@@ -67,5 +67,4 @@ def test_TC_LB_04_schema_unchanged_and_no_rows_modified(env):
             """
         )
     }
-    assert tables == {"users", "activity", "active_tasks", "collector_tokens", "password_reset_tokens",
-                      "email_verification_tokens"}
+    assert tables == {"users", "activity", "active_tasks", "collector_tokens"}

@@ -15,7 +15,6 @@ IMPORTANT (read before demoing):
   contracts — see the "ML INTEGRATION POINT" comment near the bottom.
 """
 
-import email
 import os
 import psycopg
 from psycopg.rows import dict_row
@@ -29,10 +28,6 @@ from flask import Flask, jsonify, request, g, send_from_directory, session
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
-import smtplib
-from email.message import EmailMessage
-import hashlib
-import secrets
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 FRONTEND_DIR = os.path.join(os.path.dirname(BASE_DIR), "frontend")
@@ -45,139 +40,6 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is not configured.")
 
-def send_email(to_email, subject, body):
-    import json
-    import urllib.request
-    import urllib.error
-
-    api_url = os.environ.get("EMAIL_API_URL")
-    api_token = os.environ.get("EMAIL_API_TOKEN")
-
-    if not api_url or not api_token:
-        raise RuntimeError("Email API configuration is missing.")
-
-    payload = json.dumps({
-        "to": to_email,
-        "subject": subject,
-        "body": body,
-        "token": api_token
-    }).encode("utf-8")
-
-    request = urllib.request.Request(
-        api_url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            result = json.loads(response.read().decode("utf-8"))
-
-        if not result.get("success"):
-            raise RuntimeError(
-                result.get("error", "Email service failed.")
-            )
-
-    except urllib.error.HTTPError as error:
-        raise RuntimeError(
-            f"Email service HTTP error: {error.code}"
-        ) from error
-
-
-def create_email_verification_token(conn, user_id):
-    token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-
-    expires_at = (
-        datetime.now() + timedelta(hours=24)
-    ).isoformat()
-
-    conn.execute(
-        """
-        INSERT INTO email_verification_tokens (
-            user_id, token_hash, expires_at, used
-        )
-        VALUES (%s, %s, %s, 0)
-        """,
-        (user_id, token_hash, expires_at)
-    )
-
-    return token
-
-
-def create_password_reset_token(conn, user_id):
-    token = secrets.token_urlsafe(32)
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-
-    expires_at = (
-        datetime.now() + timedelta(hours=1)
-    ).isoformat()
-
-    conn.execute(
-        """
-        INSERT INTO password_reset_tokens (
-            user_id, token_hash, expires_at, used
-        )
-        VALUES (%s, %s, %s, 0)
-        """,
-        (user_id, token_hash, expires_at)
-    )
-
-    return token
-
-def send_password_reset_email(email, full_name, token):
-    reset_link = (
-        f"{os.environ.get('APP_BASE_URL')}"
-        f"/reset-password.html?token={token}"
-    )
-
-    subject = "Reset your ProcrastiSense AI password"
-
-    body = f"""
-Hello {full_name},
-
-We received a request to reset your ProcrastiSense AI password.
-
-Click the link below to choose a new password:
-
-{reset_link}
-
-This link expires in 1 hour.
-
-If you did not request a password reset, please ignore this email.
-
-Regards,
-ProcrastiSense AI Team
-"""
-
-    send_email(email, subject, body)
-def send_verification_email(email, full_name, token):
-    verification_link = (
-        f"{os.environ.get('APP_BASE_URL')}"
-        f"/api/auth/verify-email?token={token}"
-    )
-
-    subject = "Verify your ProcrastiSense AI account"
-
-    body = f"""
-Hello {full_name},
-
-Thank you for registering with ProcrastiSense AI!
-
-Please verify your email address by clicking the link below:
-
-{verification_link}
-
-This verification link expires in 24 hours.
-
-If you did not create this account, you can ignore this email.
-
-Regards,
-ProcrastiSense AI Team
-"""
-
-    send_email(email, subject, body)
 app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path="")
 IS_PRODUCTION = (
     os.environ.get("FLASK_ENV") == "production"
@@ -441,8 +303,6 @@ def init_db():
                 full_name TEXT NOT NULL DEFAULT '',
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
-                is_verified INTEGER NOT NULL DEFAULT 0,
-                verified_at TEXT,
                 created_at TEXT NOT NULL
             )
         """)
@@ -453,37 +313,11 @@ def init_db():
             ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT ''
         """)
 
-        conn.execute("""
-            ALTER TABLE users
-            ADD COLUMN IF NOT EXISTS is_verified INTEGER NOT NULL DEFAULT 1
-        """)
-
-        conn.execute("""
-            ALTER TABLE users
-            ADD COLUMN IF NOT EXISTS verified_at TEXT
-        """)
-
-        # Password reset tokens
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS password_reset_tokens (
-                id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                token_hash TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                used INTEGER DEFAULT 0
-            )
-        """)
-
-        # Email verification tokens
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS email_verification_tokens (
-                id INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                token_hash TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                used INTEGER NOT NULL DEFAULT 0
-            )
-        """)
+        # Remove schema objects used only by the retired email flows.
+        conn.execute("DROP TABLE IF EXISTS email_verification_tokens")
+        conn.execute("DROP TABLE IF EXISTS password_reset_tokens")
+        conn.execute("ALTER TABLE users DROP COLUMN IF EXISTS is_verified")
+        conn.execute("ALTER TABLE users DROP COLUMN IF EXISTS verified_at")
 
         # Activity records
         conn.execute("""
@@ -1430,7 +1264,7 @@ def register():
     full_name = data.get("full_name", "").strip()
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
-    confirm_password = data.get("confirm_password", "")
+    confirm_password = data.get("confirm_password")
 
     if not full_name:
         return jsonify({
@@ -1456,7 +1290,7 @@ def register():
             "message": "Password must contain at least 8 characters."
         }), 400
 
-    if password != confirm_password:
+    if confirm_password is not None and password != confirm_password:
         return jsonify({
             "success": False,
             "message": "Passwords do not match."
@@ -1471,10 +1305,9 @@ def register():
                 full_name,
                 email,
                 password_hash,
-                is_verified,
                 created_at
             )
-            VALUES (%s, %s, %s, 0, %s)
+            VALUES (%s, %s, %s, %s)
             RETURNING id
             """,
             (
@@ -1486,35 +1319,15 @@ def register():
         )
 
         user_id = cursor.fetchone()["id"]
-
-        verification_token = create_email_verification_token(
-        conn, user_id
-        )
-
         conn.commit()
-
-        try:
-            send_verification_email(
-            email,
-            full_name,
-            verification_token
-        )
-        except Exception:
-            app.logger.exception("Verification email could not be sent.")
-
-            return jsonify({
-        "success": False,
-        "message": "Account created, but the verification email could not be sent. Please try again later."
-    }), 503
 
         return jsonify({
             "success": True,
-            "message": "Account created. Please verify your email before logging in.",
+            "message": "Account created. You can now log in.",
             "user": {
                 "id": user_id,
                 "full_name": full_name,
-                "email": email,
-                "is_verified": False
+                "email": email
             }
         }), 201
 
@@ -1528,250 +1341,6 @@ def register():
         conn.close()
 
 
-@app.route("/api/auth/verify-email", methods=["GET"])
-def verify_email():
-    token = request.args.get("token", "")
-
-    if not token:
-        return "Invalid verification link.", 400
-
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-
-    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
-
-    try:
-        verification = conn.execute(
-            """
-            SELECT *
-            FROM email_verification_tokens
-            WHERE token_hash = %s AND used = 0
-            """,
-            (token_hash,)
-        ).fetchone()
-
-        if not verification:
-            return "Invalid or already used verification link.", 400
-
-        expires_at = datetime.fromisoformat(verification["expires_at"])
-
-        if datetime.now() > expires_at:
-            return "Verification link has expired. Please request a new one.", 400
-
-        conn.execute(
-            """
-            UPDATE users
-            SET is_verified = 1, verified_at = %s
-            WHERE id = %s
-            """,
-            (datetime.now().isoformat(), verification["user_id"])
-        )
-
-        conn.execute(
-            """
-            UPDATE email_verification_tokens
-            SET used = 1
-            WHERE id = %s
-            """,
-            (verification["id"],)
-        )
-
-        conn.commit()
-
-        return "Email verified successfully! You can now log in to ProcrastiSense AI."
-
-    finally:
-        conn.close()
-@app.route("/api/auth/resend-verification", methods=["POST"])
-def resend_verification():
-    data = request.get_json(silent=True) or {}
-    email = data.get("email", "").strip().lower()
-
-    if not email:
-        return jsonify({
-            "success": False,
-            "message": "Enter your email address."
-        }), 400
-
-    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
-
-    try:
-        user = conn.execute(
-            "SELECT * FROM users WHERE email = %s",
-            (email,)
-        ).fetchone()
-
-        if not user:
-            return jsonify({
-                "success": True,
-                "message": "If the account exists, a verification email will be sent."
-            })
-
-        if user["is_verified"]:
-            return jsonify({
-                "success": True,
-                "message": "This email is already verified. You can log in."
-            })
-
-        token = create_email_verification_token(conn, user["id"])
-        conn.commit()
-
-        try:
-            send_verification_email(
-                user["email"],
-                user["full_name"],
-                token
-            )
-        except Exception:
-            app.logger.exception("Resend verification email failed.")
-            return jsonify({
-                "success": False,
-                "message": "Unable to send the verification email. Please try again later."
-            }), 503
-
-        return jsonify({
-            "success": True,
-            "message": "Verification email sent. Please check your inbox."
-        })
-
-    finally:
-        conn.close()
-@app.route("/api/auth/forgot-password", methods=["POST"])
-def forgot_password():
-    data = request.get_json(silent=True) or {}
-    email = data.get("email", "").strip().lower()
-
-    if not email:
-        return jsonify({
-            "success": False,
-            "message": "Enter your email address."
-        }), 400
-
-    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
-
-    try:
-        user = conn.execute(
-            "SELECT * FROM users WHERE email = %s",
-            (email,)
-        ).fetchone()
-
-        message = (
-            "If an account exists with this email, "
-            "a password reset link will be sent."
-        )
-
-        if not user:
-            return jsonify({
-                "success": True,
-                "message": message
-            })
-
-        token = create_password_reset_token(conn, user["id"])
-        conn.commit()
-
-        try:
-            send_password_reset_email(
-                user["email"],
-                user["full_name"],
-                token
-            )
-        except Exception:
-            app.logger.exception("Password reset email failed.")
-            return jsonify({
-                "success": False,
-                "message": "Unable to send the reset email. Please try again later."
-            }), 503
-
-        return jsonify({
-            "success": True,
-            "message": message
-        })
-
-    finally:
-        conn.close()
-@app.route("/api/auth/reset-password", methods=["POST"])
-def reset_password():
-    data = request.get_json(silent=True) or {}
-
-    token = data.get("token", "")
-    new_password = data.get("new_password", "")
-    confirm_password = data.get("confirm_password", "")
-
-    if not token:
-        return jsonify({
-            "success": False,
-            "message": "Invalid reset link."
-        }), 400
-
-    if len(new_password) < 8:
-        return jsonify({
-            "success": False,
-            "message": "Password must contain at least 8 characters."
-        }), 400
-
-    if new_password != confirm_password:
-        return jsonify({
-            "success": False,
-            "message": "Passwords do not match."
-        }), 400
-
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
-
-    conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
-
-    try:
-        reset = conn.execute(
-            """
-            SELECT *
-            FROM password_reset_tokens
-            WHERE token_hash = %s AND used = 0
-            """,
-            (token_hash,)
-        ).fetchone()
-
-        if not reset:
-            return jsonify({
-                "success": False,
-                "message": "Invalid or already used reset link."
-            }), 400
-
-        expires_at = datetime.fromisoformat(reset["expires_at"])
-
-        if datetime.now() > expires_at:
-            return jsonify({
-                "success": False,
-                "message": "Reset link has expired. Please request a new one."
-            }), 400
-
-        conn.execute(
-            """
-            UPDATE users
-            SET password_hash = %s
-            WHERE id = %s
-            """,
-            (
-                generate_password_hash(new_password),
-                reset["user_id"]
-            )
-        )
-
-        conn.execute(
-            """
-            UPDATE password_reset_tokens
-            SET used = 1
-            WHERE user_id = %s
-            """,
-            (reset["user_id"],)
-        )
-
-        conn.commit()
-
-        return jsonify({
-            "success": True,
-            "message": "Password reset successful. You can now log in."
-        })
-
-    finally:
-        conn.close()
 @app.route("/api/auth/login", methods=["POST"])
 def login():
     data = request.get_json(silent=True) or {}
@@ -1792,12 +1361,6 @@ def login():
                 "success": False,
                 "message": "Invalid email or password."
             }), 401
-
-        if not user["is_verified"]:
-            return jsonify({
-                "success": False,
-                "message": "Please verify your email before logging in."
-            }), 403
 
         session.clear()
         session["user_id"] = user["id"]
@@ -1821,6 +1384,52 @@ def login():
 def logout():
     session.clear()
     return jsonify({"success": True, "message": "Logged out successfully."})
+
+
+@app.route("/api/auth/delete-account", methods=["POST"])
+@login_required
+def delete_account():
+    data = request.get_json(silent=True) or {}
+    password = data.get("password", "")
+
+    if not isinstance(password, str) or not password:
+        return jsonify({
+            "success": False,
+            "message": "Enter your password to delete your account."
+        }), 400
+
+    db = get_db()
+    user_id = session["user_id"]
+
+    with db.transaction():
+        user = db.execute(
+            "SELECT password_hash FROM users WHERE id = %s",
+            (user_id,)
+        ).fetchone()
+
+        if not user:
+            session.clear()
+            return jsonify({
+                "success": False,
+                "message": "Your account could not be found."
+            }), 404
+
+        if not check_password_hash(user["password_hash"], password):
+            return jsonify({
+                "success": False,
+                "message": "Password is incorrect."
+            }), 401
+
+        db.execute("DELETE FROM activity WHERE user_id = %s", (user_id,))
+        db.execute("DELETE FROM active_tasks WHERE user_id = %s", (user_id,))
+        db.execute("DELETE FROM collector_tokens WHERE user_id = %s", (user_id,))
+        db.execute("DELETE FROM users WHERE id = %s", (user_id,))
+
+    session.clear()
+    return jsonify({
+        "success": True,
+        "message": "Your account and associated data have been deleted."
+    })
 
 
 
@@ -1857,6 +1466,14 @@ def current_user():
 @app.route("/")
 def serve_index():
     return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.route("/api/<path:path>", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+def api_not_found(path):
+    return jsonify({
+        "success": False,
+        "message": "API endpoint not found."
+    }), 404
 
 
 @app.route("/<path:path>")

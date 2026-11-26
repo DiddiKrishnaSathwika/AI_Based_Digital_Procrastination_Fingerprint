@@ -15,9 +15,14 @@ sys.path.insert(0, BACKEND_DIR)
 import app as appmod  # noqa: E402
 
 
+class FixtureEnvironment(SimpleNamespace):
+    def __repr__(self):
+        return f"FixtureEnvironment(schema={self.schema!r})"
+
+
 @pytest.fixture()
 def env(monkeypatch):
-    """Create isolated PostgreSQL tables and capture outgoing e-mails."""
+    """Create isolated PostgreSQL tables for an application test."""
     base_dsn = appmod.DATABASE_URL
     schema = "test_" + uuid.uuid4().hex
     original_connect = psycopg.connect
@@ -30,6 +35,7 @@ def env(monkeypatch):
         conn.execute(
             sql.SQL("SET search_path TO {}").format(sql.Identifier(schema))
         )
+        conn.commit()
         return conn
 
     monkeypatch.setattr(appmod.psycopg, "connect", connect_to_schema)
@@ -43,26 +49,11 @@ def env(monkeypatch):
         raise
     appmod.app.config.update(TESTING=True)
 
-    sent = SimpleNamespace(verify=[], reset=[])
-    monkeypatch.setattr(
-        appmod, "send_verification_email",
-        lambda email, name, token: sent.verify.append((email, token))
-    )
-    monkeypatch.setattr(
-        appmod, "send_password_reset_email",
-        lambda email, name, token: sent.reset.append((email, token))
-    )
-
-    def _no_real_mail(*args, **kwargs):
-        raise AssertionError("a real e-mail send was attempted during a test")
-
-    monkeypatch.setattr(appmod, "send_email", _no_real_mail)
-
     def connect():
         return connect_to_schema(base_dsn, row_factory=dict_row)
 
     def make_user(email="user@example.com", name="Test User", password="password123"):
-        """Register + verify + log in; returns (client, user_id)."""
+        """Register and log in; returns (client, user_id)."""
         client = appmod.app.test_client()
         response = client.post("/api/auth/register", json={
             "full_name": name,
@@ -71,10 +62,6 @@ def env(monkeypatch):
             "confirm_password": password,
         })
         assert response.status_code == 201, response.get_json()
-        token = [value for address, value in sent.verify if address == email][-1]
-        assert client.get(
-            f"/api/auth/verify-email?token={token}"
-        ).status_code == 200
         response = client.post("/api/auth/login", json={
             "email": email,
             "password": password,
@@ -107,10 +94,9 @@ def env(monkeypatch):
             return conn.execute(statement, params).fetchall()
 
     try:
-        yield SimpleNamespace(
+        yield FixtureEnvironment(
             schema=schema,
             dsn=base_dsn,
-            sent=sent,
             make_user=make_user,
             insert_rows=insert_rows,
             query=query,

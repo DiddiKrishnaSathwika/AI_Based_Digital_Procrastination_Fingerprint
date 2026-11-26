@@ -73,7 +73,7 @@ function toggleDemo() {
 }
 
 function showAuthForm(form) {
-  const forms = ["login", "register", "forgot", "reset"];
+  const forms = ["login", "register"];
 
   forms.forEach(name => {
     document.getElementById(name + "-form").style.display =
@@ -137,41 +137,12 @@ async function loginUser(event) {
 }
 
 
-async function requestPasswordReset(event) {
-  event.preventDefault();
-
-  const email = document.getElementById("forgot-email").value.trim();
-
-  try {
-    const response = await fetch(`${API}/api/auth/forgot-password`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ email })
-    });
-
-    const data = await response.json();
-
-    showToast(data.message || "Please check your email.");
-
-  } catch (error) {
-    showToast("Unable to connect to the server.");
-  }
-
-  return false;
-}
 async function registerUser(event) {
   event.preventDefault();
 
   const full_name = document.getElementById("register-name").value.trim();
   const email = document.getElementById("register-email").value.trim();
   const password = document.getElementById("register-password").value;
-  const confirm_password = document.getElementById("register-confirm-password").value;
-
-  if (password !== confirm_password) {
-    showToast("Passwords do not match.");
-    return false;
-  }
 
   try {
     const response = await fetch(`${API}/api/auth/register`, {
@@ -181,8 +152,7 @@ async function registerUser(event) {
       body: JSON.stringify({
         full_name,
         email,
-        password,
-        confirm_password
+        password
       })
     });
 
@@ -193,7 +163,10 @@ async function registerUser(event) {
       return false;
     }
 
-    showToast(data.message);
+    document.getElementById("login-email").value = email;
+    document.getElementById("login-password").value = "";
+    showAuthForm("login");
+    showToast(data.message || "Account created. You can now log in.");
 
   } catch (error) {
     showToast("Unable to connect to the server.");
@@ -225,6 +198,43 @@ async function logoutUser() {
   } catch (error) {
     showToast("Unable to log out. Please try again.");
   }
+}
+
+async function deleteAccount(event) {
+  event.preventDefault();
+
+  if (!window.confirm("Delete your account and all associated activity data? This cannot be undone.")) {
+    return false;
+  }
+
+  const password = document.getElementById("delete-account-password").value;
+
+  try {
+    const response = await fetch(`${API}/api/auth/delete-account`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ password })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      showToast(data.message || "Account deletion failed.");
+      return false;
+    }
+
+    document.getElementById("delete-account-form").reset();
+    document.getElementById("app").style.display = "none";
+    document.getElementById("auth-screen").style.display = "none";
+    document.getElementById("landing").style.display = "block";
+    window.scrollTo(0, 0);
+    showToast(data.message || "Your account has been deleted.");
+  } catch (error) {
+    showToast("Unable to connect to the server.");
+  }
+
+  return false;
 }
 
 function generatePassword() {
@@ -270,7 +280,6 @@ function generatePassword() {
   const password = passwordCharacters.join("");
 
   document.getElementById("register-password").value = password;
-  document.getElementById("register-confirm-password").value = password;
 
   showToast("Strong password generated!");
 }
