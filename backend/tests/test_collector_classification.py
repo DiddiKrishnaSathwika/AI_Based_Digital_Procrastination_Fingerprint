@@ -1,9 +1,9 @@
 """Collector classification tests.
 
 The collector imports Windows-only modules (win32gui, win32process, winotify, psutil) at the top of the file,
-so they are replaced by stubs here. These tests therefore exercise ONLY the pure classification functions
-(classify_application, get_activity_name). They do NOT test foreground-window capture, process lookup,
-the local bridge, timing or toast notifications - those must be tested on Windows.
+so they are replaced by stubs here. The tests cover classification and delivery queue behavior. They do NOT test
+foreground-window capture, process lookup, the local bridge, or toast notifications;
+those must be tested on Windows.
 """
 import importlib.util
 import os
@@ -105,3 +105,63 @@ def test_TC_CL_08_KNOWN_LIMITATION_substring_false_positives(collector):
     assert collector.classify_application("chrome.exe", "Dropbox - box.com") == ("Social Media", "Distracted")
     # 'threads' (social-media keyword) matches a programming article; social keywords are checked first
     assert collector.classify_application("chrome.exe", "Python threads tutorial - Stack Overflow") == ("Social Media", "Distracted")
+
+
+@pytest.mark.parametrize("failure", ["network", "http"])
+def test_TC_CL_09_failed_activity_delivery_is_retained_and_retried(
+    collector, monkeypatch, failure
+):
+    class RequestError(Exception):
+        pass
+
+    monkeypatch.setattr(
+        collector.requests,
+        "exceptions",
+        types.SimpleNamespace(RequestException=RequestError),
+        raising=False,
+    )
+    monkeypatch.setattr(collector, "PENDING_ACTIVITY", [])
+    monkeypatch.setattr(collector, "NEXT_RETRY_AT", 0.0)
+    monkeypatch.setattr(collector, "CURRENT_COLLECTOR_TOKEN", "test-token")
+    monkeypatch.setattr(collector, "CURRENT_TASK_TYPE", "Study")
+    monkeypatch.setattr(collector, "CURRENT_TASK_DIFFICULTY", "Medium")
+
+    attempts = []
+
+    def post(url, **kwargs):
+        attempts.append((url, kwargs))
+        if len(attempts) == 1:
+            if failure == "network":
+                raise RequestError("offline")
+            return types.SimpleNamespace(status_code=503)
+        return types.SimpleNamespace(status_code=201)
+
+    monkeypatch.setattr(collector.requests, "post", post, raising=False)
+
+    collector.send_activity("YouTube", "Entertainment", 30, "Distracted")
+
+    assert len(collector.PENDING_ACTIVITY) == 1
+    collector.NEXT_RETRY_AT = 0.0
+    collector.flush_pending_activities()
+
+    assert collector.PENDING_ACTIVITY == []
+    assert len(attempts) == 2
+    assert attempts[0][0] == collector.API_URL
+    assert attempts[0][1]["headers"] == {
+        "Authorization": "Bearer test-token"
+    }
+
+
+def test_TC_CL_10_windows_idle_time_uses_last_input_tick(collector, monkeypatch):
+    def get_last_input_info(pointer):
+        pointer._obj.dwTime = 1000
+        return 1
+
+    fake_windll = types.SimpleNamespace(
+        user32=types.SimpleNamespace(GetLastInputInfo=get_last_input_info),
+        kernel32=types.SimpleNamespace(GetTickCount=lambda: 6000),
+    )
+    monkeypatch.setattr(collector.os, "name", "nt")
+    monkeypatch.setattr(collector.ctypes, "windll", fake_windll, raising=False)
+
+    assert collector.get_idle_seconds() == 5

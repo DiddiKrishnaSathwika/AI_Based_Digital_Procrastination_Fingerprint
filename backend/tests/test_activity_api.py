@@ -15,7 +15,7 @@ def test_TC_API_01_collector_token_stored_hashed(env):
     """TC-API-01: a collector token is returned once and only its SHA-256 hash is stored."""
     c, uid = env.make_user()
     tok = c.post("/api/collector/token").get_json()["token"]
-    stored = env.query("SELECT token_hash FROM collector_tokens WHERE user_id=?", (uid,))[0]["token_hash"]
+    stored = env.query("SELECT token_hash FROM collector_tokens WHERE user_id=%s", (uid,))[0]["token_hash"]
     assert stored != tok and len(stored) == 64
 
 
@@ -26,7 +26,7 @@ def test_TC_API_02_bearer_post_creates_realtime_record(env):
     bare = appmod.app.test_client()                      # no session cookie, like the desktop collector
     r = bare.post("/api/activity", json=REC, headers=h)
     assert r.status_code == 201 and r.get_json()["source"] == "realtime"
-    row_ = env.query("SELECT * FROM activity WHERE user_id=?", (uid,))[0]
+    row_ = env.query("SELECT * FROM activity WHERE user_id=%s", (uid,))[0]
     assert row_["source"] == "realtime" and row_["application"] == "YouTube"
 
 
@@ -44,7 +44,7 @@ def test_TC_API_04_browser_post_is_tagged_manual(env):
     c, uid = env.make_user()
     r = c.post("/api/activity", json=REC)
     assert r.status_code == 201 and r.get_json()["source"] == "manual"
-    assert env.query("SELECT source FROM activity WHERE user_id=?", (uid,))[0]["source"] == "manual"
+    assert env.query("SELECT source FROM activity WHERE user_id=%s", (uid,))[0]["source"] == "manual"
 
 
 def test_TC_API_05_regenerating_token_invalidates_previous(env):

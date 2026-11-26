@@ -1,5 +1,7 @@
 
-from app import app, init_db
+if __package__:
+    from .app import app, init_db
+else:
+    from app import app, init_db
 
-# Initialize database tables when the production server starts.
 init_db()

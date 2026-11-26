@@ -81,7 +81,7 @@ The system aims to:
 | Frontend | HTML, CSS, JavaScript |
 | Data Visualization | Chart.js |
 | Backend | Python, Flask |
-| Database | SQLite |
+| Database | Neon PostgreSQL |
 | Activity Monitoring | Python, Windows activity collector |
 | API Communication | REST API, JSON |
 | Testing | Pytest |
@@ -105,7 +105,7 @@ The application follows a frontend-backend architecture.
         +------------------+
         |                  |
         v                  v
-   SQLite Database    Activity Collector
+   Neon PostgreSQL    Activity Collector
                            |
                            v
                    Windows Application
@@ -145,9 +145,17 @@ ProcrastiSense-AI/
 |-- scripts/
 |
 |-- README.md
+|-- pyproject.toml
+|-- requirements.txt
+|-- vercel.json
 ```
 
 *Note: Generated databases, virtual environments, caches, and local configuration files are environment-specific and should not be included in the public repository.*
+
+The existing ignored `backend/procrastisense.db` SQLite file is not accessed,
+changed, or automatically imported by the PostgreSQL backend. Keep a backup
+and complete a separately verified one-time data import before relying on old
+SQLite records in Neon.
 
 ## 8. Installation and Setup
 
@@ -168,13 +176,18 @@ git clone YOUR_GITHUB_REPOSITORY_URL
 cd ProcrastiSense-AI
 ```
 
-### Step 2: Navigate to the Backend
+### Step 2: Configure the Database
 
-```powershell
-cd backend
-```
+Create a root-level `.env` file (it is ignored by Git) with the Neon
+`DATABASE_URL`, a locally generated `SECRET_KEY`, and the values required by
+the email service. Do not commit credentials.
+
+The backend loads this root `.env` for local development. Vercel deployments
+must set those values in the project's Environment Variables instead.
 
 ### Step 3: Create a Virtual Environment
+
+Run these commands from the repository root:
 
 ```powershell
 python -m venv .venv
@@ -189,24 +202,64 @@ python -m venv .venv
 ### Step 5: Install Dependencies
 
 ```powershell
-pip install -r requirements.txt
+pip install -r backend\requirements.txt
 ```
 
 ### Step 6: Start the Backend
 
 ```powershell
-python app.py
+python backend\app.py
 ```
 
 ### Step 7: Open the Application
 
 Open the local application URL configured by the Flask backend in your browser.
 
-For the local development configuration, the application uses port 5050.
+For local development, the application uses port 5050.
 
 ```text
 http://localhost:5050
 ```
+
+### Running the tests
+
+The backend tests create and drop a uniquely named PostgreSQL schema for each
+test. The configured database user must be allowed to create schemas. Run from
+the repository root:
+
+```powershell
+pip install -r backend\requirements-dev.txt
+python -m pytest backend\tests
+```
+
+### Vercel deployment
+
+Keep the Vercel project root set to the repository root so both `backend` and
+`frontend` are part of the deployment. The root `pyproject.toml` points Vercel
+to `backend.wsgi:app`; the root `requirements.txt` includes the backend runtime
+dependencies, and `vercel.json` packages the sibling `frontend` files with the
+function.
+
+Set `DATABASE_URL`, `SECRET_KEY`, `APP_BASE_URL`, `EMAIL_API_URL`,
+`EMAIL_API_TOKEN`, and `FLASK_ENV=production` as Vercel environment variables.
+Set `FRONTEND_ORIGIN` if the frontend uses a separate origin; same-origin
+frontend/API hosting does not require CORS. Use `.env.example` as the local
+configuration template, replacing all placeholders privately.
+
+For the desktop collector, install `backend\requirements-collector.txt` and
+set `COLLECTOR_API_URL` to the deployed Flask API's `/api/activity` URL.
+`FRONTEND_ORIGIN` must include the website origin for its local collector
+bridge requests. The collector defaults to `http://localhost:5050/api/activity`
+when no API URL is configured.
+
+Vercel dashboard steps:
+
+1. Import the repository and keep the project root at the repository root.
+2. Add the environment variables above in Project Settings → Environment
+   Variables for each deployment environment.
+3. Use a Neon pooled `DATABASE_URL`; do not put credentials in the repository.
+4. Deploy manually after reviewing the deployment configuration. No deployment
+   is triggered by this repository configuration.
 
 ## 9. Activity Collector
 
@@ -220,27 +273,10 @@ The collector requires its corresponding Python dependencies and appropriate bac
 
 ## 10. Testing
 
-The project includes automated tests covering different application components.
-
-The test suite includes areas such as:
-
-- Authentication.
-- Activity API.
-- Database operations.
-- Analytics.
-- Collector functionality.
-- Interventions.
-- Weekly reports.
-- Integration functionality.
-
-To execute the tests, install the development dependencies and run:
-
-```powershell
-pip install -r requirements-dev.txt
-pytest
-```
-
-Test results should be checked in the local development environment.
+The project includes tests for authentication, activity, analytics, collector
+behavior, interventions, weekly reports, and integration functionality. See
+the PostgreSQL test instructions in Section 8. Tests require a configured
+`DATABASE_URL` and create isolated PostgreSQL schemas.
 
 ## 11. Privacy and Security
 

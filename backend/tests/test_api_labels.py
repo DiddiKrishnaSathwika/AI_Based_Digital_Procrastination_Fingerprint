@@ -45,9 +45,27 @@ def test_TC_LB_03_existing_dashboard_fields_unchanged(env):
 
 def test_TC_LB_04_schema_unchanged_and_no_rows_modified(env):
     """TC-LB-04: the schema has exactly the original tables/columns (no schema change in this patch)."""
-    cols = {r["name"] for r in env.query("PRAGMA table_info(activity)")}
+    cols = {
+        row["column_name"]
+        for row in env.query(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = 'activity'
+            """
+        )
+    }
     assert cols == {"id", "timestamp", "application", "category", "duration_min", "task_type", "task_difficulty",
                     "idle_seconds", "notifications", "focus_level", "source", "user_id"}
-    tables = {r["name"] for r in env.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")}
+    tables = {
+        row["table_name"]
+        for row in env.query(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+            """
+        )
+    }
     assert tables == {"users", "activity", "active_tasks", "collector_tokens", "password_reset_tokens",
                       "email_verification_tokens"}

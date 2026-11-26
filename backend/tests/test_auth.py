@@ -1,4 +1,3 @@
-import sqlite3
 from datetime import datetime, timedelta
 from conftest import appmod
 
@@ -61,10 +60,11 @@ def test_TC_AUTH_06_expired_verification_token(env):
     """TC-AUTH-06: an expired verification token is rejected."""
     c = appmod.app.test_client()
     reg(c)
-    conn = sqlite3.connect(env.db_file)
-    conn.execute("UPDATE email_verification_tokens SET expires_at = ?",
-                 ((datetime.now() - timedelta(hours=1)).isoformat(),))
-    conn.commit(); conn.close()
+    with env.connect() as conn:
+        conn.execute(
+            "UPDATE email_verification_tokens SET expires_at = %s",
+            ((datetime.now() - timedelta(hours=1)).isoformat(),)
+        )
     assert c.get(f"/api/auth/verify-email?token={env.sent.verify[0][1]}").status_code == 400
 
 

@@ -1,5 +1,6 @@
+import os
 import time
-from turtle import title
+import ctypes
 import requests
 import win32gui
 import win32process
@@ -9,11 +10,23 @@ from winotify import Notification, audio
 import json
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from dotenv import load_dotenv
 
 
-API_URL = "http://127.0.0.1:5050/api/activity"
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(BACKEND_DIR)
+load_dotenv(os.path.join(PROJECT_DIR, ".env"))
+load_dotenv(os.path.join(BACKEND_DIR, ".env"))
+
+API_URL = os.environ.get(
+    "COLLECTOR_API_URL",
+    "http://localhost:5050/api/activity"
+).strip()
 
 CHECK_INTERVAL = 2
+RETRY_INTERVAL_SECONDS = 5
+PENDING_ACTIVITY = []
+NEXT_RETRY_AT = 0.0
 
 
 FOCUS_APPS = {
@@ -370,7 +383,76 @@ CURRENT_TASK_TYPE = None
 CURRENT_TASK_DIFFICULTY = None
 CURRENT_COLLECTOR_TOKEN = None
 
-def send_activity(application, category, duration, focus_level):
+
+def get_idle_seconds():
+    """Return seconds since the last Windows input event."""
+    if os.name != "nt":
+        return 0
+
+    from ctypes import wintypes
+
+    class LastInputInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.UINT),
+            ("dwTime", wintypes.DWORD),
+        ]
+
+    info = LastInputInfo()
+    info.cbSize = ctypes.sizeof(info)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        return 0
+
+    elapsed_ms = (
+        ctypes.windll.kernel32.GetTickCount() - info.dwTime
+    ) & 0xFFFFFFFF
+    return elapsed_ms // 1000
+
+
+def flush_pending_activities():
+    """Retry queued activity records without discarding failed submissions."""
+    global NEXT_RETRY_AT
+
+    if time.monotonic() < NEXT_RETRY_AT:
+        return
+
+    while PENDING_ACTIVITY:
+        payload, token = PENDING_ACTIVITY[0]
+
+        try:
+            response = requests.post(
+                API_URL,
+                json=payload,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=3
+            )
+        except requests.exceptions.RequestException:
+            NEXT_RETRY_AT = time.monotonic() + RETRY_INTERVAL_SECONDS
+            print(
+                "[WARNING] Activity API is unavailable; "
+                f"{len(PENDING_ACTIVITY)} record(s) queued for retry."
+            )
+            return
+
+        if response.status_code != 201:
+            NEXT_RETRY_AT = time.monotonic() + RETRY_INTERVAL_SECONDS
+            print(
+                "[WARNING] Activity API rejected a record "
+                f"(HTTP {response.status_code}); "
+                f"{len(PENDING_ACTIVITY)} record(s) retained for retry."
+            )
+            return
+
+        PENDING_ACTIVITY.pop(0)
+        print(
+            f"[RECORDED] {payload['application']} | {payload['category']} | "
+            f"{payload['focus_level']} | {payload['task_type']} | "
+            f"{payload['task_difficulty']}"
+        )
+
+    NEXT_RETRY_AT = 0.0
+
+
+def send_activity(application, category, duration, focus_level, idle_seconds=0):
     """
     Sends one completed activity session to Flask.
     """
@@ -395,45 +477,27 @@ def send_activity(application, category, duration, focus_level):
         "duration_min": round(duration / 60, 2),
         "task_type": CURRENT_TASK_TYPE,
         "task_difficulty": CURRENT_TASK_DIFFICULTY,
-        "idle_seconds": 0,
+        "idle_seconds": idle_seconds,
         "notifications": 0,
         "focus_level": focus_level
     }
 
-    try:
-        headers = {}
-
-        if CURRENT_COLLECTOR_TOKEN:
-            headers["Authorization"] = f"Bearer {CURRENT_COLLECTOR_TOKEN}"
-
-        response = requests.post(
-            API_URL,
-            json=payload,
-            headers=headers,
-            timeout=3
-        )
-
-        if response.status_code == 201:
-            print(
-                f"[RECORDED] "
-                f"{application} | "
-                f"{category} | "
-                f"{round(duration, 1)} sec | "
-                f"{focus_level} | "
-                f"{CURRENT_TASK_TYPE} | "
-                f"{CURRENT_TASK_DIFFICULTY}"
-            )
-        else:
-            print("Activity API response:", response.status_code, response.text)
-    except requests.exceptions.RequestException:
-        print("[WARNING] Flask server is not running.")
+    PENDING_ACTIVITY.append((payload, CURRENT_COLLECTOR_TOKEN))
+    flush_pending_activities()
 
 
 class CollectorBridgeHandler(BaseHTTPRequestHandler):
 
     ALLOWED_ORIGINS = {
         "http://127.0.0.1:5050",
-        "http://localhost:5050"
+        "http://localhost:5050",
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+        *(
+            origin.strip().rstrip("/")
+            for origin in os.environ.get("FRONTEND_ORIGIN", "").split(",")
+            if origin.strip()
+        ),
     }
 
     def send_cors_headers(self):
@@ -444,11 +508,14 @@ class CollectorBridgeHandler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
 
     def do_OPTIONS(self):
-
         self.send_response(204)
         self.send_cors_headers()
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+        if self.headers.get("Access-Control-Request-Private-Network") == "true":
+            self.send_header("Access-Control-Allow-Private-Network", "true")
+
         self.end_headers()
 
     def do_POST(self):
@@ -573,9 +640,55 @@ def main():
     try:
         while True:
 
+            flush_pending_activities()
+            idle_seconds = get_idle_seconds()
+            now = time.time()
+
+            if idle_seconds >= 60:
+                if previous_focus != "Idle":
+                    idle_started_at = now - idle_seconds
+                    active_duration = max(0, idle_started_at - session_start)
+
+                    if previous_activity is not None and active_duration > 0:
+                        send_activity(
+                            previous_activity,
+                            previous_category,
+                            active_duration,
+                            previous_focus
+                        )
+
+                    previous_process = None
+                    previous_activity = "Screen Locked"
+                    previous_category = "Other"
+                    previous_focus = "Idle"
+                    session_start = idle_started_at
+                    distraction_start = None
+                    distraction_alert_sent = False
+
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            if previous_focus == "Idle":
+                idle_duration = max(0, now - session_start)
+                if idle_duration > 0:
+                    send_activity(
+                        previous_activity,
+                        previous_category,
+                        idle_duration,
+                        "Idle",
+                        idle_seconds=int(idle_duration)
+                    )
+
+                previous_process = None
+                previous_activity = None
+                previous_category = None
+                previous_focus = None
+                session_start = now
+
             process_name, _, window_title = get_active_window()
 
             if process_name is None:
+                flush_pending_activities()
                 time.sleep(CHECK_INTERVAL)
                 continue
 
@@ -615,7 +728,8 @@ def main():
                     previous_activity,
                     previous_category,
                     duration,
-                    previous_focus
+                    previous_focus,
+                    idle_seconds=int(duration) if previous_focus == "Idle" else 0
                 )
 
                 previous_process = process_name
