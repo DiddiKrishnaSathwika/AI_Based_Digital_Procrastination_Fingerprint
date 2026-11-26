@@ -1,16 +1,20 @@
-"""Collector classification tests.
+"""Collector classification and bridge tests.
 
 The collector imports Windows-only modules (win32gui, win32process, winotify, psutil) at the top of the file,
 so they are replaced by stubs here. The tests cover classification and delivery queue behavior. They do NOT test
-foreground-window capture, process lookup, the local bridge, or toast notifications;
-those must be tested on Windows.
+foreground-window capture, process lookup, or toast notifications; those must be tested on Windows.
 """
+import http.client
 import importlib.util
+import json
 import os
 import sys
+import threading
+import time
 import types
 
 import pytest
+from conftest import appmod
 
 PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "activity_collector.py")
 
@@ -165,3 +169,336 @@ def test_TC_CL_10_windows_idle_time_uses_last_input_tick(collector, monkeypatch)
     monkeypatch.setattr(collector.ctypes, "windll", fake_windll, raising=False)
 
     assert collector.get_idle_seconds() == 5
+
+
+def _bridge_request(collector, method, path, headers, body=None):
+    server = collector.HTTPServer(
+        ("127.0.0.1", 0),
+        collector.CollectorBridgeHandler,
+    )
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", server.server_port, timeout=3
+        )
+        connection.request(
+            method,
+            path,
+            body=json.dumps(body) if body is not None else None,
+            headers=headers,
+        )
+        response = connection.getresponse()
+        result = (
+            response.status,
+            {name.lower(): value for name, value in response.getheaders()},
+        )
+        response.read()
+        connection.close()
+        return result
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
+
+
+def _stop_bridge_request(collector, interval):
+    errors = []
+
+    def service_stop_request():
+        if not collector.STOP_REQUESTED.wait(timeout=5):
+            errors.append(TimeoutError("stop request was not signaled"))
+            return
+        try:
+            collector.STOP_SUCCESS = collector.flush_activity_before_stop(
+                *interval
+            )
+        except Exception as error:
+            errors.append(error)
+            collector.STOP_SUCCESS = False
+        finally:
+            collector.STOP_REQUESTED.clear()
+            collector.STOP_COMPLETED.set()
+
+    collector.STOP_REQUESTED.clear()
+    collector.STOP_COMPLETED.clear()
+    collector.STOP_SUCCESS = False
+    service_thread = threading.Thread(target=service_stop_request)
+    service_thread.start()
+    result = _bridge_request(
+        collector,
+        "POST",
+        "/task",
+        {
+            "Origin": "http://localhost:5000",
+            "Content-Type": "application/json",
+        },
+        {"action": "stop"},
+    )
+    service_thread.join(timeout=3)
+    assert not service_thread.is_alive()
+    return result, errors
+
+
+@pytest.mark.parametrize("origin", [
+    "https://ai-based-digital-procrastination-fingerprint-de7l3c4ge.vercel.app",
+    "https://ai-based-digital-procrastination-fi.vercel.app",
+    "https://procrastisenseai.vercel.app",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000",
+])
+def test_TC_CL_11_bridge_preflight_allows_frontend_origins(collector, origin):
+    status, headers = _bridge_request(
+        collector,
+        "OPTIONS",
+        "/task",
+        {
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+            "Access-Control-Request-Private-Network": "true",
+        },
+    )
+
+    assert status == 204
+    assert headers["access-control-allow-origin"] == origin
+    assert headers["access-control-allow-methods"] == "POST, OPTIONS"
+    assert headers["access-control-allow-headers"] == "Content-Type"
+    assert headers["access-control-allow-private-network"] == "true"
+
+
+def test_TC_CL_12_bridge_preflight_rejects_unlisted_origin(collector):
+    status, headers = _bridge_request(
+        collector,
+        "OPTIONS",
+        "/task",
+        {
+            "Origin": "https://unlisted.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert status == 403
+    assert "access-control-allow-origin" not in headers
+
+
+@pytest.mark.parametrize(
+    ("path", "request_method", "request_headers", "expected_status"),
+    [
+        ("/task", "PUT", "content-type", 405),
+        ("/task", "POST", "content-type, authorization", 403),
+        ("/other", "POST", "content-type", 404),
+    ],
+)
+def test_TC_CL_13_bridge_preflight_restricts_path_method_and_headers(
+    collector, path, request_method, request_headers, expected_status
+):
+    status, _ = _bridge_request(
+        collector,
+        "OPTIONS",
+        path,
+        {
+            "Origin": "https://procrastisenseai.vercel.app",
+            "Access-Control-Request-Method": request_method,
+            "Access-Control-Request-Headers": request_headers,
+        },
+    )
+
+    assert status == expected_status
+
+
+def test_TC_CL_14_stopping_flushes_pending_and_active_activity_before_token_clear(
+    collector, monkeypatch
+):
+    pending = {
+        "application": "Previous App",
+        "category": "Coding",
+        "duration_min": 1,
+        "task_type": "Coding",
+        "task_difficulty": "Medium",
+        "focus_level": "Focused",
+    }
+    monkeypatch.setattr(collector, "PENDING_ACTIVITY", [(pending, "active-token")])
+    monkeypatch.setattr(collector, "NEXT_RETRY_AT", time.monotonic() + 60)
+    monkeypatch.setattr(collector, "CURRENT_COLLECTOR_TOKEN", "active-token")
+    monkeypatch.setattr(collector, "CURRENT_TASK_TYPE", "Coding")
+    monkeypatch.setattr(collector, "CURRENT_TASK_DIFFICULTY", "Medium")
+
+    posted = []
+
+    def post(url, **kwargs):
+        posted.append(kwargs["json"])
+        return types.SimpleNamespace(status_code=201)
+
+    monkeypatch.setattr(collector.requests, "post", post, raising=False)
+    result, errors = _stop_bridge_request(
+        collector,
+        ("Current App", "Coding", "Focused", time.time() - 30),
+    )
+
+    assert result[0] == 200 and errors == []
+    assert [payload["application"] for payload in posted] == [
+        "Previous App", "Current App"
+    ]
+    assert collector.PENDING_ACTIVITY == []
+    assert collector.CURRENT_COLLECTOR_TOKEN is None
+
+
+def test_TC_CL_15_stopping_without_pending_activity_clears_token_without_post(
+    collector, monkeypatch
+):
+    monkeypatch.setattr(collector, "PENDING_ACTIVITY", [])
+    monkeypatch.setattr(collector, "CURRENT_COLLECTOR_TOKEN", "active-token")
+    monkeypatch.setattr(collector, "CURRENT_TASK_TYPE", "Coding")
+    monkeypatch.setattr(collector, "CURRENT_TASK_DIFFICULTY", "Medium")
+    posted = []
+    monkeypatch.setattr(
+        collector.requests,
+        "post",
+        lambda *args, **kwargs: posted.append(kwargs),
+        raising=False,
+    )
+
+    result, errors = _stop_bridge_request(
+        collector,
+        (None, None, None, time.time()),
+    )
+
+    assert result[0] == 200 and errors == []
+    assert posted == []
+    assert collector.CURRENT_COLLECTOR_TOKEN is None
+
+
+def test_TC_CL_16_normal_flush_and_repeated_stop_do_not_duplicate_records(
+    collector, monkeypatch
+):
+    monkeypatch.setattr(collector, "PENDING_ACTIVITY", [])
+    monkeypatch.setattr(collector, "NEXT_RETRY_AT", 0.0)
+    monkeypatch.setattr(collector, "CURRENT_COLLECTOR_TOKEN", "active-token")
+    monkeypatch.setattr(collector, "CURRENT_TASK_TYPE", "Coding")
+    monkeypatch.setattr(collector, "CURRENT_TASK_DIFFICULTY", "Medium")
+    posted = []
+
+    def post(url, **kwargs):
+        posted.append(kwargs["json"])
+        return types.SimpleNamespace(status_code=201)
+
+    monkeypatch.setattr(collector.requests, "post", post, raising=False)
+    collector.send_activity("Previous App", "Coding", 30, "Focused")
+    assert [payload["application"] for payload in posted] == ["Previous App"]
+
+    result, errors = _stop_bridge_request(
+        collector,
+        ("Current App", "Coding", "Focused", time.time() - 15),
+    )
+    assert result[0] == 200 and errors == []
+    assert [payload["application"] for payload in posted] == [
+        "Previous App", "Current App"
+    ]
+
+    repeated_result, repeated_errors = _stop_bridge_request(
+        collector,
+        (None, None, None, time.time()),
+    )
+    assert repeated_result[0] == 200 and repeated_errors == []
+    assert [payload["application"] for payload in posted] == [
+        "Previous App", "Current App"
+    ]
+
+
+def test_TC_CL_17_stop_network_failure_retains_queue_and_active_token(
+    collector, monkeypatch
+):
+    pending = {
+        "application": "Queued App",
+        "category": "Coding",
+        "duration_min": 1,
+        "focus_level": "Focused",
+    }
+    monkeypatch.setattr(collector, "PENDING_ACTIVITY", [(pending, "active-token")])
+    monkeypatch.setattr(collector, "NEXT_RETRY_AT", 0.0)
+    monkeypatch.setattr(collector, "CURRENT_COLLECTOR_TOKEN", "active-token")
+    monkeypatch.setattr(collector, "CURRENT_TASK_TYPE", "Coding")
+    monkeypatch.setattr(collector, "CURRENT_TASK_DIFFICULTY", "Medium")
+
+    class RequestError(Exception):
+        pass
+
+    monkeypatch.setattr(
+        collector.requests,
+        "exceptions",
+        types.SimpleNamespace(RequestException=RequestError),
+        raising=False,
+    )
+
+    def post(url, **kwargs):
+        raise RequestError("offline")
+
+    monkeypatch.setattr(collector.requests, "post", post, raising=False)
+    result, errors = _stop_bridge_request(
+        collector,
+        (None, None, None, time.time()),
+    )
+
+    assert result[0] == 503 and errors == []
+    assert collector.PENDING_ACTIVITY == [(pending, "active-token")]
+    assert collector.CURRENT_COLLECTOR_TOKEN == "active-token"
+
+
+def test_TC_CL_18_retry_after_lost_success_response_inserts_one_record(
+    collector, monkeypatch, env
+):
+    user_client, user_id = env.make_user("collector-retry@example.com")
+    token = user_client.post("/api/collector/token").get_json()["token"]
+    api_client = appmod.app.test_client()
+
+    monkeypatch.setattr(collector, "PENDING_ACTIVITY", [])
+    monkeypatch.setattr(collector, "NEXT_RETRY_AT", 0.0)
+    monkeypatch.setattr(collector, "CURRENT_COLLECTOR_TOKEN", token)
+    monkeypatch.setattr(collector, "CURRENT_TASK_TYPE", "Coding")
+    monkeypatch.setattr(collector, "CURRENT_TASK_DIFFICULTY", "Medium")
+
+    class RequestError(Exception):
+        pass
+
+    monkeypatch.setattr(
+        collector.requests,
+        "exceptions",
+        types.SimpleNamespace(RequestException=RequestError),
+        raising=False,
+    )
+    attempts = []
+
+    def post(url, **kwargs):
+        response = api_client.post(
+            "/api/activity",
+            json=kwargs["json"],
+            headers=kwargs["headers"],
+        )
+        attempts.append(response.status_code)
+        assert response.status_code == 201
+        if len(attempts) == 1:
+            raise RequestError("simulated lost response after database commit")
+        return response
+
+    monkeypatch.setattr(collector.requests, "post", post, raising=False)
+    collector.send_activity("VS Code", "Coding", 30, "Focused", flush=False)
+    first_key = collector.PENDING_ACTIVITY[0][0]["idempotency_key"]
+
+    collector.flush_pending_activities(force=True)
+    assert len(collector.PENDING_ACTIVITY) == 1
+    assert collector.PENDING_ACTIVITY[0][0]["idempotency_key"] == first_key
+
+    collector.flush_pending_activities(force=True)
+    assert collector.PENDING_ACTIVITY == []
+    assert attempts == [201, 201]
+    stored = env.query(
+        "SELECT id, idempotency_key FROM activity WHERE user_id = %s",
+        (user_id,),
+    )
+    assert len(stored) == 1
+    assert stored[0]["idempotency_key"] == first_key
+    activity_response = user_client.get("/api/activity")
+    assert activity_response.status_code == 200
+    assert "idempotency_key" not in activity_response.get_json()[0]

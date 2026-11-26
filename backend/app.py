@@ -22,6 +22,7 @@ import random
 import math
 import secrets
 import hashlib
+import uuid
 from functools import wraps
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, g, send_from_directory, session
@@ -333,8 +334,14 @@ def init_db():
                 notifications INTEGER DEFAULT 0,
                 focus_level TEXT NOT NULL,
                 source TEXT DEFAULT 'synthetic',
+                idempotency_key TEXT,
                 user_id INTEGER REFERENCES users(id)
             )
+        """)
+
+        conn.execute("""
+            ALTER TABLE activity
+            ADD COLUMN IF NOT EXISTS idempotency_key TEXT
         """)
 
         conn.execute("""
@@ -367,6 +374,11 @@ def init_db():
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_activity_user_id
             ON activity(user_id)
+        """)
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_user_idempotency_key
+            ON activity(user_id, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
         """)
 
 
@@ -1523,6 +1535,23 @@ def api_activity():
 
     if request.method == "POST":
         d = request.get_json(force=True)
+        idempotency_key = d.get("idempotency_key")
+        if idempotency_key is not None:
+            if (
+                not isinstance(idempotency_key, str)
+                or len(idempotency_key) not in (32, 36)
+            ):
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid activity idempotency key."
+                }), 400
+            try:
+                idempotency_key = uuid.UUID(idempotency_key).hex
+            except ValueError:
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid activity idempotency key."
+                }), 400
 
         # Records posted from the logged-in browser (Data Collection form) are
         # tagged 'manual'; records posted by the desktop collector with its
@@ -1534,9 +1563,13 @@ def api_activity():
             INSERT INTO activity (
                 timestamp, application, category, duration_min,
                 task_type, task_difficulty, idle_seconds,
-                notifications, focus_level, source, user_id
+                notifications, focus_level, source, user_id,
+                idempotency_key
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id, idempotency_key)
+            WHERE idempotency_key IS NOT NULL
+            DO NOTHING
             """,
             (
                 d.get("timestamp") or datetime.now().isoformat(timespec="minutes"),
@@ -1549,7 +1582,8 @@ def api_activity():
                 int(d.get("notifications", 0)),
                 d.get("focus_level") or "Focused",
                 record_source,
-                user_id
+                user_id,
+                idempotency_key
             )
         )
 
@@ -1559,7 +1593,13 @@ def api_activity():
     limit = min(int(request.args.get("limit", 60)), 500)
     filt = request.args.get("filter", "All")
 
-    q = "SELECT * FROM activity WHERE user_id = %s"
+    q = """
+        SELECT id, timestamp, application, category, duration_min,
+               task_type, task_difficulty, idle_seconds, notifications,
+               focus_level, source, user_id
+        FROM activity
+        WHERE user_id = %s
+    """
     params = [user_id]
 
     if filt != "All":

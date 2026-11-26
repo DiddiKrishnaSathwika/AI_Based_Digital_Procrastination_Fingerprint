@@ -43,8 +43,8 @@ def test_TC_LB_03_existing_dashboard_fields_unchanged(env):
                     "app_switches", "avg_focus_session_min", "data_label"}
 
 
-def test_TC_LB_04_activity_schema_unchanged_and_email_tables_removed(env):
-    """TC-LB-04: activity columns remain stable while retired auth tables are absent."""
+def test_TC_LB_04_activity_schema_and_email_tables(env):
+    """TC-LB-04: activity columns include retry idempotency while retired auth tables are absent."""
     cols = {
         row["column_name"]
         for row in env.query(
@@ -56,7 +56,7 @@ def test_TC_LB_04_activity_schema_unchanged_and_email_tables_removed(env):
         )
     }
     assert cols == {"id", "timestamp", "application", "category", "duration_min", "task_type", "task_difficulty",
-                    "idle_seconds", "notifications", "focus_level", "source", "user_id"}
+                    "idle_seconds", "notifications", "focus_level", "source", "user_id", "idempotency_key"}
     tables = {
         row["table_name"]
         for row in env.query(

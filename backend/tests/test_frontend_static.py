@@ -83,6 +83,82 @@ const fetch = (u) => Promise.resolve({{ json: () => ({json.dumps(payload)}) }});
     return json.loads(r.stdout.strip().splitlines()[-1])
 
 
+def _run_fingerprint(fp_payload, activity_payload, fingerprint_status=200, activity_status=200):
+    responses = [
+        {"ok": fingerprint_status == 200, "status": fingerprint_status, "payload": fp_payload},
+        {"ok": activity_status == 200, "status": activity_status, "payload": activity_payload},
+    ]
+    script = f"""
+const values = {{}};
+const elements = {{}};
+const makeElement = (tagName, id = null) => {{
+  const element = {{
+    tagName,
+    className: "",
+    style: {{}},
+    children: [],
+    append(...children) {{ this.children.push(...children); }},
+    replaceChildren(...children) {{
+      this.children = children;
+      if (id) values[id + ":children"] = children.map(serialize);
+    }}
+  }};
+  Object.defineProperty(element, "textContent", {{
+    set(value) {{
+      this._textContent = String(value);
+      this.children = [];
+      if (id) values[id + ":text"] = this._textContent;
+    }},
+    get() {{ return this._textContent || ""; }}
+  }});
+  Object.defineProperty(element, "innerHTML", {{
+    set(value) {{
+      this._innerHTML = String(value);
+      if (id) values[id + ":html"] = this._innerHTML;
+    }},
+    get() {{ return this._innerHTML || ""; }}
+  }});
+  return element;
+}};
+const serialize = element => ({{
+  tagName: element.tagName,
+  className: element.className,
+  textContent: element.textContent,
+  children: element.children.map(serialize)
+}});
+const document = {{
+  getElementById(id) {{
+    return elements[id] ||= makeElement("div", id);
+  }},
+  createElement: tagName => makeElement(tagName)
+}};
+const responses = {json.dumps(responses)};
+const activityRows = responses[1].payload;
+const fetch = async url => {{
+  const response = responses.shift();
+  return {{ ok: response.ok, status: response.status, json: async () => response.payload }};
+}};
+const showToast = message => {{ values.toast = message; }};
+const console = {{ error: (...args) => {{ values.error = args.map(String).join(" "); }} }};
+const API = "";
+{_extract("drawFingerprintRing")}
+{_extract("loadFingerprint")}
+(async () => {{
+  await loadFingerprint();
+  values.draw = {{
+    id: "fingerprint-viz",
+    rows: activityRows,
+    size: 300,
+    html: elements["fingerprint-viz"].innerHTML
+  }};
+  process.stdout.write(JSON.stringify(values));
+}})().catch(error => {{ process.stderr.write(String(error)); process.exitCode = 1; }});
+"""
+    result = subprocess.run([NODE, "-e", script], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 @pytest.mark.node
 @pytest.mark.skipif(NODE is None, reason="node not installed")
 def test_TC_UI_06_weekly_modal_renders_comparison_and_unavailable_and_empty():
@@ -159,3 +235,102 @@ def test_TC_UI_12_email_auth_forms_removed_and_toast_visible():
         assert needle not in JS, needle
     assert HTML.index('id="toast"') < HTML.index('id="app"')
     assert 'id="delete-account-form"' in HTML
+
+
+@pytest.mark.node
+@pytest.mark.skipif(NODE is None, reason="node not installed")
+def test_TC_UI_13_fingerprint_handles_empty_null_and_missing_window():
+    empty = {
+        "typical_focus_duration_min": None,
+        "typical_distraction_window": None,
+        "app_switching_pattern": "Insufficient data",
+        "most_frequent_distraction": "Insufficient data",
+        "most_risky_task": "Insufficient data",
+        "most_risky_time": "Insufficient data",
+        "average_recovery_time_min": None,
+        "narrative": "No activity recorded.",
+        "label": "Insufficient real-time activity data",
+    }
+
+    for window in (None, "unexpected"):
+        payload = {**empty, "typical_distraction_window": window}
+        result = _run_fingerprint(payload, [])
+        metric_text = [child["textContent"] for tile in result["fp-metrics:children"]
+                       for child in tile["children"]]
+        assert "TYPICAL DISTRACTION WINDOW" in metric_text
+        assert "Insufficient data" in metric_text
+        assert result["draw"]["rows"] == []
+
+    missing = {key: value for key, value in empty.items()
+               if key != "typical_distraction_window"}
+    result = _run_fingerprint(missing, [])
+    metric_text = [child["textContent"] for tile in result["fp-metrics:children"]
+                   for child in tile["children"]]
+    assert "Insufficient data" in metric_text
+
+
+@pytest.mark.node
+@pytest.mark.skipif(NODE is None, reason="node not installed")
+def test_TC_UI_14_fingerprint_displays_recorded_window_and_activity():
+    activities = [{
+        "application": "VS Code",
+        "duration_min": 6,
+        "focus_level": "Focused",
+    }]
+    result = _run_fingerprint({
+        "typical_focus_duration_min": 6,
+        "typical_distraction_window": [6, 11],
+        "app_switching_pattern": "Low",
+        "most_frequent_distraction": "Insufficient data",
+        "most_risky_task": "Insufficient data",
+        "most_risky_time": "Insufficient data",
+        "average_recovery_time_min": None,
+        "narrative": "Recorded focused activity.",
+        "label": "Generated from Real-Time Activity Data",
+    }, activities)
+
+    metric_text = [child["textContent"] for tile in result["fp-metrics:children"]
+                   for child in tile["children"]]
+    assert "6" in metric_text[3] and "11 min" in metric_text[3]
+    assert result["draw"]["rows"] == activities
+    assert result["fp-narrative:text"] == "Recorded focused activity."
+
+
+@pytest.mark.node
+@pytest.mark.skipif(NODE is None, reason="node not installed")
+def test_TC_UI_16_fingerprint_escapes_malicious_activity_values():
+    malicious = '<img src=x onerror="alert(1)"><script>alert(2)</script>'
+    result = _run_fingerprint({
+        "typical_focus_duration_min": 6,
+        "typical_distraction_window": [6, 11],
+        "app_switching_pattern": "Low",
+        "most_frequent_distraction": malicious,
+        "most_risky_task": "High",
+        "most_risky_time": "12:00 - 14:00",
+        "average_recovery_time_min": None,
+        "narrative": "Recorded activity.",
+        "label": "Generated from Real-Time Activity Data",
+    }, [{
+        "application": malicious,
+        "duration_min": 6,
+        "focus_level": "Distracted",
+    }])
+
+    metric_text = [child["textContent"] for tile in result["fp-metrics:children"]
+                   for child in tile["children"]]
+    assert malicious in metric_text
+    assert "<img" not in result["draw"]["html"]
+    assert "<script>" not in result["draw"]["html"]
+    assert "&lt;img" in result["draw"]["html"]
+    assert "&lt;script&gt;" in result["draw"]["html"]
+    assert "fp-metrics:html" not in result
+
+
+@pytest.mark.node
+@pytest.mark.skipif(NODE is None, reason="node not installed")
+def test_TC_UI_15_fingerprint_api_failure_is_reported_without_rejection():
+    result = _run_fingerprint({}, [], fingerprint_status=503)
+
+    assert result["toast"] == "Unable to load fingerprint data. Please try again."
+    assert result["fp-narrative:text"] == "Fingerprint data could not be loaded."
+    assert "HTTP 503" in result["error"]

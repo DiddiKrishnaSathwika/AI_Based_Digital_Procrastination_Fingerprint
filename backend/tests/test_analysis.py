@@ -75,6 +75,90 @@ def test_TC_AN_07_fingerprint_merges_focus_across_distraction_KNOWN_BEHAVIOUR():
     assert runs == [10.0, 10.0]
 
 
+def test_TC_AN_11_fingerprint_api_shape_for_empty_and_recorded_users(env):
+    """The fingerprint API keeps its schema and realtime rows are persisted and reflected."""
+    client, user_id = env.make_user("fingerprint@x.com")
+    empty = client.get("/api/fingerprint")
+    assert empty.status_code == 200
+    empty_fingerprint = empty.get_json()
+    expected_fields = {
+        "typical_focus_duration_min",
+        "typical_distraction_window",
+        "app_switching_pattern",
+        "most_frequent_distraction",
+        "most_used_applications",
+        "most_risky_task",
+        "most_risky_time",
+        "average_recovery_time_min",
+        "productive_time_min",
+        "distracted_time_min",
+        "productive_percentage",
+        "distraction_percentage",
+        "application_switches",
+        "narrative",
+        "label",
+    }
+    assert set(empty_fingerprint) == expected_fields
+    assert empty_fingerprint["typical_distraction_window"] is None
+    assert empty_fingerprint["most_used_applications"] == []
+
+    token = client.post("/api/collector/token").get_json()["token"]
+    collector_client = appmod.app.test_client()
+    response = collector_client.post(
+        "/api/activity",
+        json={
+            "timestamp": "2026-11-26T10:00:00",
+            "application": "VS Code",
+            "category": "Coding",
+            "duration_min": 6,
+            "task_type": "Coding",
+            "task_difficulty": "Medium",
+            "focus_level": "Focused",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201
+    stored = env.query(
+        "SELECT source, application FROM activity WHERE user_id = %s",
+        (user_id,),
+    )
+    assert stored == [{"source": "realtime", "application": "VS Code"}]
+
+    populated = client.get("/api/fingerprint")
+    assert populated.status_code == 200
+    fingerprint = populated.get_json()
+    assert set(fingerprint) == expected_fields
+    assert fingerprint["typical_distraction_window"] == [6, 11]
+    assert fingerprint["most_used_applications"] == [
+        {"application": "VS Code", "duration_min": 6.0}
+    ]
+
+
+def test_TC_AN_12_fingerprint_preserves_activity_category_text(env):
+    """Fingerprint data preserves a raw activity category for safe frontend rendering."""
+    client, _ = env.make_user("fingerprint-category@x.com")
+    token = client.post("/api/collector/token").get_json()["token"]
+    malicious_category = '<img src=x onerror="alert(1)">'
+    collector_client = appmod.app.test_client()
+    response = collector_client.post(
+        "/api/activity",
+        json={
+            "timestamp": "2026-11-26T10:00:00",
+            "application": "Unknown App",
+            "category": malicious_category,
+            "duration_min": 2,
+            "task_type": "Coding",
+            "task_difficulty": "Medium",
+            "focus_level": "Distracted",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 201
+    fingerprint = client.get("/api/fingerprint").get_json()
+    assert fingerprint["most_frequent_distraction"] == malicious_category
+
+
 def test_TC_AN_08_analytics_route_values(env):
     """TC-AN-08: analytics route returns category minutes, hourly distraction counts and focus buckets."""
     c, uid = env.make_user()

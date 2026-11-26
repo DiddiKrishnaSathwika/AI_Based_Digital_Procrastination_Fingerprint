@@ -27,6 +27,7 @@ def test_TC_DB_01_schema_creates_all_tables_and_index(env):
     }
     assert tables == {"users", "activity", "active_tasks", "collector_tokens"}
     assert "idx_activity_user_id" in indexes
+    assert "idx_activity_user_idempotency_key" in indexes
 
 
 def test_TC_DB_02_init_db_is_idempotent(env):
@@ -84,8 +85,11 @@ def test_TC_DB_03_migration_adds_user_id_and_keeps_legacy_rows(env):
         )
     }
     rows = env.query("SELECT user_id, application FROM activity")
-    assert "user_id" in columns
+    assert {"user_id", "idempotency_key"}.issubset(columns)
     assert rows == [{"user_id": None, "application": "Chrome"}]
+    assert env.query(
+        "SELECT idempotency_key FROM activity"
+    ) == [{"idempotency_key": None}]
 
 
 def test_TC_DB_04_email_is_unique(env):

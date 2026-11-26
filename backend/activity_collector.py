@@ -9,6 +9,7 @@ from datetime import datetime
 from winotify import Notification, audio
 import json
 import threading
+import uuid
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
@@ -27,6 +28,10 @@ CHECK_INTERVAL = 2
 RETRY_INTERVAL_SECONDS = 5
 PENDING_ACTIVITY = []
 NEXT_RETRY_AT = 0.0
+STOP_REQUESTED = threading.Event()
+STOP_COMPLETED = threading.Event()
+STOP_SUCCESS = False
+STOP_WAIT_SECONDS = 30
 
 
 FOCUS_APPS = {
@@ -408,11 +413,11 @@ def get_idle_seconds():
     return elapsed_ms // 1000
 
 
-def flush_pending_activities():
+def flush_pending_activities(force=False):
     """Retry queued activity records without discarding failed submissions."""
     global NEXT_RETRY_AT
 
-    if time.monotonic() < NEXT_RETRY_AT:
+    if not force and time.monotonic() < NEXT_RETRY_AT:
         return
 
     while PENDING_ACTIVITY:
@@ -452,7 +457,9 @@ def flush_pending_activities():
     NEXT_RETRY_AT = 0.0
 
 
-def send_activity(application, category, duration, focus_level, idle_seconds=0):
+def send_activity(
+    application, category, duration, focus_level, idle_seconds=0, flush=True
+):
     """
     Sends one completed activity session to Flask.
     """
@@ -471,6 +478,7 @@ def send_activity(application, category, duration, focus_level, idle_seconds=0):
 )
 
     payload = {
+        "idempotency_key": uuid.uuid4().hex,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "application": application,
         "category": category,
@@ -483,12 +491,55 @@ def send_activity(application, category, duration, focus_level, idle_seconds=0):
     }
 
     PENDING_ACTIVITY.append((payload, CURRENT_COLLECTOR_TOKEN))
-    flush_pending_activities()
+    if flush:
+        flush_pending_activities()
+
+
+def flush_activity_before_stop(
+    previous_activity,
+    previous_category,
+    previous_focus,
+    session_start,
+):
+    """Queue and flush the active interval before clearing its authentication token."""
+    global CURRENT_TASK_TYPE
+    global CURRENT_TASK_DIFFICULTY
+    global CURRENT_COLLECTOR_TOKEN
+
+    duration = max(0, time.time() - session_start)
+    if (
+        previous_activity is not None
+        and duration > 0
+        and CURRENT_COLLECTOR_TOKEN
+        and CURRENT_TASK_TYPE
+    ):
+        send_activity(
+            previous_activity,
+            previous_category,
+            duration,
+            previous_focus,
+            idle_seconds=int(duration) if previous_focus == "Idle" else 0,
+            flush=False,
+        )
+
+    flush_pending_activities(force=True)
+    if PENDING_ACTIVITY:
+        return False
+
+    CURRENT_TASK_TYPE = None
+    CURRENT_TASK_DIFFICULTY = None
+    CURRENT_COLLECTOR_TOKEN = None
+    return True
 
 
 class CollectorBridgeHandler(BaseHTTPRequestHandler):
 
     ALLOWED_ORIGINS = {
+        "https://ai-based-digital-procrastination-fingerprint-de7l3c4ge.vercel.app",
+        "https://ai-based-digital-procrastination-fi.vercel.app",
+        "https://procrastisenseai.vercel.app",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
         "http://127.0.0.1:5050",
         "http://localhost:5050",
         "http://127.0.0.1:5500",
@@ -508,6 +559,33 @@ class CollectorBridgeHandler(BaseHTTPRequestHandler):
             self.send_header("Vary", "Origin")
 
     def do_OPTIONS(self):
+        if self.path != "/task":
+            self.send_error(404, "Endpoint not found")
+            return
+
+        origin = self.headers.get("Origin", "")
+        if origin not in self.ALLOWED_ORIGINS:
+            self.send_error(403, "Origin not allowed")
+            return
+
+        requested_method = self.headers.get(
+            "Access-Control-Request-Method", ""
+        ).upper()
+        if requested_method != "POST":
+            self.send_error(405, "Method not allowed")
+            return
+
+        requested_headers = {
+            header.strip().lower()
+            for header in self.headers.get(
+                "Access-Control-Request-Headers", ""
+            ).split(",")
+            if header.strip()
+        }
+        if not requested_headers.issubset({"content-type"}):
+            self.send_error(403, "Request header not allowed")
+            return
+
         self.send_response(204)
         self.send_cors_headers()
         self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -523,6 +601,9 @@ class CollectorBridgeHandler(BaseHTTPRequestHandler):
         global CURRENT_TASK_TYPE
         global CURRENT_TASK_DIFFICULTY
         global CURRENT_COLLECTOR_TOKEN
+        global STOP_REQUESTED
+        global STOP_COMPLETED
+        global STOP_SUCCESS
 
         origin = self.headers.get("Origin", "")
 
@@ -564,10 +645,22 @@ class CollectorBridgeHandler(BaseHTTPRequestHandler):
                 CURRENT_TASK_DIFFICULTY = difficulty
 
             elif action == "stop":
+                STOP_COMPLETED.clear()
+                STOP_SUCCESS = False
+                STOP_REQUESTED.set()
+                if not STOP_COMPLETED.wait(timeout=STOP_WAIT_SECONDS):
+                    self.send_error(
+                        503,
+                        "Collector did not confirm activity flush before timeout",
+                    )
+                    return
 
-                CURRENT_TASK_TYPE = None
-                CURRENT_TASK_DIFFICULTY = None
-                CURRENT_COLLECTOR_TOKEN = None
+                if not STOP_SUCCESS:
+                    self.send_error(
+                        503,
+                        "Pending activity could not be uploaded; retry stopping",
+                    )
+                    return
 
             else:
                 self.send_error(400, "Invalid action")
@@ -606,6 +699,7 @@ def run_collector_bridge():
 def main():
 
     global CURRENT_TASK_TYPE, CURRENT_TASK_DIFFICULTY
+    global STOP_REQUESTED, STOP_COMPLETED, STOP_SUCCESS
 
     # Task and difficulty will be received from the website.
     CURRENT_TASK_TYPE = None
@@ -640,7 +734,44 @@ def main():
     try:
         while True:
 
+            if STOP_REQUESTED.is_set():
+                try:
+                    STOP_SUCCESS = flush_activity_before_stop(
+                        previous_activity,
+                        previous_category,
+                        previous_focus,
+                        session_start,
+                    )
+                except Exception as error:
+                    STOP_SUCCESS = False
+                    print("Collector stop flush failed:", error)
+                finally:
+                    session_start = time.time()
+                    STOP_REQUESTED.clear()
+                    STOP_COMPLETED.set()
+
+                if STOP_SUCCESS:
+                    previous_process = None
+                    previous_activity = None
+                    previous_category = None
+                    previous_focus = None
+                    distraction_start = None
+                    distraction_alert_sent = False
+                    continue
+
             flush_pending_activities()
+
+            if not CURRENT_COLLECTOR_TOKEN or not CURRENT_TASK_TYPE:
+                previous_process = None
+                previous_activity = None
+                previous_category = None
+                previous_focus = None
+                session_start = time.time()
+                distraction_start = None
+                distraction_alert_sent = False
+                time.sleep(CHECK_INTERVAL)
+                continue
+
             idle_seconds = get_idle_seconds()
             now = time.time()
 

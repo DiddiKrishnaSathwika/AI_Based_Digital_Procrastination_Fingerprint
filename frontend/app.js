@@ -576,21 +576,80 @@ function closeReport() { document.getElementById("report-modal").classList.remov
 
 /* ---------------- Fingerprint ---------------- */
 async function loadFingerprint() {
-  const fp = await fetch(`${API}/api/fingerprint`).then(x => x.json());
-  document.getElementById("fp-narrative").textContent = fp.narrative;
-  document.getElementById("fp-metrics").innerHTML = [
-    ["Typical Focus Duration", fp.typical_focus_duration_min + " min"],
-    ["Typical Distraction Window", fp.typical_distraction_window.join("–") + " min"],
-    ["App Switching Pattern", fp.app_switching_pattern],
-    ["Most Frequent Distraction", fp.most_frequent_distraction],
-    ["Most Risky Task", fp.most_risky_task],
-    ["Most Risky Time", fp.most_risky_time],
-    ["Average Distraction Episode", fp.average_recovery_time_min + " min"],
-    ["Source", fp.label],
-  ].map(([l, v]) => `<div class="tile"><div class="num">${l.toUpperCase()}</div><h3 style="font-size:15px;margin-top:8px;">${v}</h3></div>`).join("");
+  try {
+    const fingerprintResponse = await fetch(`${API}/api/fingerprint`);
+    if (!fingerprintResponse.ok) {
+      throw new Error(`Fingerprint API returned HTTP ${fingerprintResponse.status}`);
+    }
 
-  const rows = await fetch(`${API}/api/activity?limit=60`).then(x => x.json());
-  drawFingerprintRing("fingerprint-viz", rows, 300);
+    const fp = await fingerprintResponse.json();
+    if (!fp || typeof fp !== "object" || Array.isArray(fp)) {
+      throw new Error("Fingerprint API returned an invalid response.");
+    }
+
+    const activityResponse = await fetch(`${API}/api/activity?limit=60`);
+    if (!activityResponse.ok) {
+      throw new Error(`Activity API returned HTTP ${activityResponse.status}`);
+    }
+
+    const rows = await activityResponse.json();
+    if (!Array.isArray(rows) || !rows.every(row =>
+      row && typeof row === "object" && !Array.isArray(row)
+    )) {
+      throw new Error("Activity API returned an invalid response.");
+    }
+
+    const displayText = value =>
+      typeof value === "string" && value.trim()
+        ? value
+        : "Insufficient data";
+    const displayMinutes = value =>
+      Number.isFinite(value) ? `${value} min` : "Insufficient data";
+    const windowRange = Array.isArray(fp.typical_distraction_window)
+      && fp.typical_distraction_window.length === 2
+      && fp.typical_distraction_window.every(Number.isFinite)
+      ? `${fp.typical_distraction_window.join("–")} min`
+      : "Insufficient data";
+
+    document.getElementById("fp-narrative").textContent =
+      displayText(fp.narrative);
+    const metrics = [
+      ["Typical Focus Duration", displayMinutes(fp.typical_focus_duration_min)],
+      ["Typical Distraction Window", windowRange],
+      ["App Switching Pattern", displayText(fp.app_switching_pattern)],
+      ["Most Frequent Distraction", displayText(fp.most_frequent_distraction)],
+      ["Most Risky Task", displayText(fp.most_risky_task)],
+      ["Most Risky Time", displayText(fp.most_risky_time)],
+      ["Average Distraction Episode", displayMinutes(fp.average_recovery_time_min)],
+      ["Source", displayText(fp.label)],
+    ];
+    const metricsContainer = document.getElementById("fp-metrics");
+    metricsContainer.replaceChildren(...metrics.map(([label, value]) => {
+      const tile = document.createElement("div");
+      tile.className = "tile";
+
+      const heading = document.createElement("div");
+      heading.className = "num";
+      heading.textContent = label.toUpperCase();
+
+      const metricValue = document.createElement("h3");
+      metricValue.style.fontSize = "15px";
+      metricValue.style.marginTop = "8px";
+      metricValue.textContent = value;
+
+      tile.append(heading, metricValue);
+      return tile;
+    }));
+
+    drawFingerprintRing("fingerprint-viz", rows, 300);
+  } catch (error) {
+    console.error("Fingerprint load error:", error);
+    document.getElementById("fp-narrative").textContent =
+      "Fingerprint data could not be loaded.";
+    document.getElementById("fp-metrics").textContent = "";
+    document.getElementById("fingerprint-viz").innerHTML = "";
+    showToast("Unable to load fingerprint data. Please try again.");
+  }
 }
 
 
@@ -613,6 +672,11 @@ function drawFingerprintRing(svgId, rows, size) {
   };
 
   const activityRows = Array.isArray(rows) ? rows : [];
+  const escapeSvgText = value => String(value).replace(/[&<>]/g, character => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;"
+  })[character]);
 
   let html = "";
 
@@ -672,6 +736,8 @@ function drawFingerprintRing(svgId, rows, size) {
       const color = colors[row.focus_level] || "#6C7A96";
 
       const duration = Number(row.duration_min) || 0;
+      const application = escapeSvgText(row.application || "Unknown");
+      const focusLevel = escapeSvgText(row.focus_level || "Other");
 
       html += `
         <path
@@ -683,7 +749,7 @@ function drawFingerprintRing(svgId, rows, size) {
           fill="none"
           stroke-linecap="round"
           opacity="0.85">
-          <title>${row.application || "Unknown"} — ${duration.toFixed(2)} min — ${row.focus_level || "Other"}</title>
+          <title>${application} — ${duration.toFixed(2)} min — ${focusLevel}</title>
         </path>
       `;
 
